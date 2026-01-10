@@ -12,8 +12,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
-use Laravel\Socialite\Facades\Socialite;
 use Laravel\Socialite\Contracts\User as SocialiteUser;
+use Laravel\Socialite\Facades\Socialite;
 use Log;
 
 class SocialAuthController extends Controller
@@ -25,15 +25,14 @@ class SocialAuthController extends Controller
      */
     public function redirect(string $provider): RedirectResponse
     {
-        if (!in_array($provider, $this->providers)) {
+        if (! in_array($provider, $this->providers)) {
             abort(404);
         }
 
         $driver = Socialite::driver($provider);
 
-        // Request email scope for GitHub
         if ($provider === 'github') {
-            $driver->scopes(['read:user', 'user:email']);
+            $driver->scopes(['read:user', 'user:email', 'repo']);
         }
 
         return $driver->redirect();
@@ -44,13 +43,12 @@ class SocialAuthController extends Controller
      */
     public function callback(string $provider): RedirectResponse
     {
-        if (!in_array($provider, $this->providers)) {
+        if (! in_array($provider, $this->providers)) {
             abort(404);
         }
 
         try {
             $socialUser = Socialite::driver($provider)->user();
-            // GitHub: Fetch email if null
             if ($provider === 'github' && empty($socialUser->getEmail())) {
                 $email = $this->getGitHubEmail($socialUser->token);
                 if ($email) {
@@ -62,14 +60,13 @@ class SocialAuthController extends Controller
             return redirect()->route('login')->with('error', 'Authentication failed: ' . $e->getMessage());
         }
 
-        // Check if we have an email
         if (empty($socialUser->getEmail())) {
             return redirect()->route('login')->with('error', 'Unable to retrieve email from ' . ucfirst($provider) . '. Please make sure your email is public or try another provider.');
         }
 
         $user = $this->handleOAuthUser($provider, $socialUser);
 
-        if (!$user) {
+        if (! $user) {
             return redirect()->route('login')->with('error', 'Unable to authenticate. Please try again.');
         }
 
@@ -91,14 +88,12 @@ class SocialAuthController extends Controller
             if ($response->successful()) {
                 $emails = $response->json();
 
-                // Find primary email
                 foreach ($emails as $email) {
                     if ($email['primary'] && $email['verified']) {
                         return $email['email'];
                     }
                 }
 
-                // Fallback: first verified email
                 foreach ($emails as $email) {
                     if ($email['verified']) {
                         return $email['email'];
@@ -119,7 +114,7 @@ class SocialAuthController extends Controller
     {
         $email = $socialUser->getEmail();
 
-        if (!$email) {
+        if (! $email) {
             return null;
         }
 
@@ -133,6 +128,9 @@ class SocialAuthController extends Controller
                     'avatar' => $socialUser->getAvatar(),
                     'provider_email' => $email,
                     'provider_data' => $this->getProviderData($socialUser),
+                    'access_token' => $socialUser->token,
+                    'refresh_token' => $socialUser->refreshToken ?? null,
+                    'token_expires_at' => $socialUser->expiresIn ? now()->addSeconds($socialUser->expiresIn) : null,
                 ]);
 
                 return $socialAccount->user;
@@ -142,6 +140,7 @@ class SocialAuthController extends Controller
 
             if ($user) {
                 $this->createSocialAccount($user, $provider, $socialUser);
+
                 return $user;
             }
 
@@ -159,6 +158,9 @@ class SocialAuthController extends Controller
         });
     }
 
+    /**
+     * @return array<string, mixed>
+     */
     protected function getProviderData(SocialiteUser $socialUser): array
     {
         return [
@@ -178,6 +180,9 @@ class SocialAuthController extends Controller
             'provider_email' => $socialUser->getEmail(),
             'avatar' => $socialUser->getAvatar(),
             'provider_data' => $this->getProviderData($socialUser),
+            'access_token' => $socialUser->token,
+            'refresh_token' => $socialUser->refreshToken ?? null,
+            'token_expires_at' => $socialUser->expiresIn ? now()->addSeconds($socialUser->expiresIn) : null,
         ]);
     }
 }

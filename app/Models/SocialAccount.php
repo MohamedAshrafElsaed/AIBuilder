@@ -1,9 +1,35 @@
 <?php
+
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+/**
+ * @property int $id
+ * @property int $user_id
+ * @property string $provider
+ * @property string $provider_id
+ * @property string|null $provider_email
+ * @property string|null $avatar
+ * @property array<array-key, mixed>|null $provider_data
+ * @property \Illuminate\Support\Carbon|null $created_at
+ * @property \Illuminate\Support\Carbon|null $updated_at
+ * @property-read \App\Models\User $user
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|SocialAccount newModelQuery()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|SocialAccount newQuery()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|SocialAccount query()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|SocialAccount whereAvatar($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|SocialAccount whereCreatedAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|SocialAccount whereId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|SocialAccount whereProvider($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|SocialAccount whereProviderData($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|SocialAccount whereProviderEmail($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|SocialAccount whereProviderId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|SocialAccount whereUpdatedAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|SocialAccount whereUserId($value)
+ * @mixin \Eloquent
+ */
 class SocialAccount extends Model
 {
     protected $fillable = [
@@ -13,14 +39,39 @@ class SocialAccount extends Model
         'provider_email',
         'avatar',
         'provider_data',
+        'access_token',
+        'refresh_token',
+        'token_expires_at',
     ];
 
-    protected $casts = [
-        'provider_data' => 'array',
-    ];
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'provider_data' => 'array',
+            'access_token' => 'encrypted',
+            'refresh_token' => 'encrypted',
+            'token_expires_at' => 'datetime',
+        ];
+    }
 
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function hasValidToken(): bool
+    {
+        if (! $this->access_token) {
+            return false;
+        }
+
+        if ($this->token_expires_at && $this->token_expires_at->isPast()) {
+            return false;
+        }
+
+        return true;
     }
 }

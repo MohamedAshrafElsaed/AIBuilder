@@ -37,3 +37,23 @@ export interface User {
 }
 
 export type BreadcrumbItemType = BreadcrumbItem;
+
+export interface Repository {
+    id: number;
+    full_name: string;
+    name: string;
+    owner: string;
+    private: boolean;
+    description: string | null;
+    default_branch: string;
+    updated_at?: string;
+    html_url?: string;
+}
+
+export interface Project {
+    id: number;
+    repo_full_name: string;
+    default_branch: string;
+    status: string;
+    created_at: string;
+}
