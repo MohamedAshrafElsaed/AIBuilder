@@ -44,6 +44,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('/projects/{project}/retry-scan', [ProjectController::class, 'retryScan'])->name('projects.retry-scan');
     Route::delete('/projects/{project}', [ProjectController::class, 'destroy'])->name('projects.destroy');
 
+    // Ask AI page (Inertia)
+    Route::get('/projects/{project}/ask', [ProjectController::class, 'askAI'])->name('projects.ask');
+
     Route::delete('/settings/social-accounts/{provider}', [SocialAccountController::class, 'destroy'])
         ->whereIn('provider', ['github', 'google'])
         ->name('settings.social-accounts.destroy');

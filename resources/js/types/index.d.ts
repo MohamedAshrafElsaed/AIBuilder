@@ -124,3 +124,6 @@ export interface ExtensionStats {
     total_size: number;
     total_lines: number;
 }
+
+// Re-export Ask AI types
+export * from './askai';

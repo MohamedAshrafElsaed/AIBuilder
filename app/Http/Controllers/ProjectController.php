@@ -17,21 +17,10 @@ use Inertia\Response;
 class ProjectController extends Controller
 {
     public function __construct(
-        private GitHubService $github,
+        private GitHubService    $github,
         private ProgressReporter $progressReporter,
-    ) {}
-
-    public function create(Request $request): Response|RedirectResponse
+    )
     {
-        $user = $request->user();
-
-        if (!$user->hasGitHubToken()) {
-            return redirect()->route('github.connect');
-        }
-
-        return Inertia::render('projects/SelectRepository', [
-            'repositories' => fn() => $this->github->getRepositories($user),
-        ]);
     }
 
     public function confirm(Request $request): Response|RedirectResponse
@@ -88,6 +77,19 @@ class ProjectController extends Controller
             ->with('new_project_id', $project->id);
     }
 
+    public function create(Request $request): Response|RedirectResponse
+    {
+        $user = $request->user();
+
+        if (!$user->hasGitHubToken()) {
+            return redirect()->route('github.connect');
+        }
+
+        return Inertia::render('projects/SelectRepository', [
+            'repositories' => fn() => $this->github->getRepositories($user),
+        ]);
+    }
+
     public function show(Project $project): Response|RedirectResponse
     {
         $user = request()->user();
@@ -124,6 +126,55 @@ class ProjectController extends Controller
             'directories' => fn() => $scanner->getDirectorySummary($project),
             'topLevelDirectories' => fn() => $scanner->getTopLevelDirectorySummary($project),
             'extensionStats' => fn() => $this->getExtensionStats($project),
+        ]);
+    }
+
+    private function getExtensionStats(Project $project): array
+    {
+        return $project->files()
+            ->selectRaw('extension, COUNT(*) as count, SUM(size_bytes) as total_size, SUM(line_count) as total_lines')
+            ->whereNotNull('extension')
+            ->groupBy('extension')
+            ->orderByDesc('count')
+            ->limit(20)
+            ->get()
+            ->map(fn($row) => [
+                'extension' => $row->extension,
+                'count' => $row->count,
+                'total_size' => $row->total_size,
+                'total_lines' => $row->total_lines,
+            ])
+            ->toArray();
+    }
+
+    public function askAI(Project $project): Response|RedirectResponse
+    {
+        $user = request()->user();
+
+        // Ensure user owns this project
+        if ($project->user_id !== $user->id) {
+            abort(403);
+        }
+
+        // If project is not ready, redirect to show page
+        if ($project->status !== 'ready') {
+            return redirect()->route('projects.show', $project);
+        }
+
+        return Inertia::render('projects/AskAI', [
+            'project' => [
+                'id' => $project->id,
+                'repo_full_name' => $project->repo_full_name,
+                'owner' => $project->owner,
+                'repo_name' => $project->repo_name,
+                'default_branch' => $project->default_branch,
+                'status' => $project->status,
+                'scanned_at' => $project->scanned_at?->toIso8601String(),
+                'github_url' => $project->getGitHubUrl(),
+                'total_files' => $project->total_files,
+                'total_lines' => $project->total_lines,
+                'stack_info' => $project->stack_info,
+            ],
         ]);
     }
 
@@ -182,23 +233,5 @@ class ProjectController extends Controller
 
         return redirect()->route('dashboard')
             ->with('message', 'Project deleted successfully.');
-    }
-
-    private function getExtensionStats(Project $project): array
-    {
-        return $project->files()
-            ->selectRaw('extension, COUNT(*) as count, SUM(size_bytes) as total_size, SUM(line_count) as total_lines')
-            ->whereNotNull('extension')
-            ->groupBy('extension')
-            ->orderByDesc('count')
-            ->limit(20)
-            ->get()
-            ->map(fn($row) => [
-                'extension' => $row->extension,
-                'count' => $row->count,
-                'total_size' => $row->total_size,
-                'total_lines' => $row->total_lines,
-            ])
-            ->toArray();
     }
 }

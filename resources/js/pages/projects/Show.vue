@@ -8,6 +8,7 @@ import { Head, Link, router } from '@inertiajs/vue3';
 import {
     AlertCircle,
     ArrowLeft,
+    Bot,
     Calendar,
     CheckCircle2,
     ChevronDown,
@@ -20,6 +21,7 @@ import {
     GitBranch,
     GitCommit,
     Layers,
+    MessageSquare,
     RefreshCw,
     Sparkles,
     Trash2,
@@ -120,115 +122,59 @@ const getBadgeClass = (type: string) => {
 };
 
 // Build hierarchical tree from flat directory list
-const directoryTree = computed(() => {
-    const tree: Map<string, DirectoryWithDepth & { children: string[], isExpanded: boolean }> = new Map();
-
-    // First pass: create all directory entries
-    for (const dir of props.directories) {
-        tree.set(dir.directory, {
-            ...dir,
-            children: [],
-            isExpanded: expandedDirs.value.has(dir.directory),
-        });
-    }
-
-    // Second pass: build parent-child relationships
-    for (const dir of props.directories) {
-        if (dir.directory === '(root)') continue;
-
-        const parts = dir.directory.split('/');
-        if (parts.length > 1) {
-            const parentPath = parts.slice(0, -1).join('/');
-            const parent = tree.get(parentPath);
-            if (parent) {
-                parent.children.push(dir.directory);
-            }
-        }
-    }
-
-    return tree;
-});
-
-// Get visible directories based on expansion state
 const visibleDirectories = computed(() => {
-    const visible: DirectoryWithDepth[] = [];
-    const processed = new Set<string>();
+    if (!showFullTree.value) return [];
 
-    // Sort directories by path
-    const sortedDirs = [...props.directories].sort((a, b) =>
-        a.directory.localeCompare(b.directory)
-    );
+    return props.directories.filter(dir => {
+        if (dir.depth === 0) return true;
 
-    for (const dir of sortedDirs) {
-        if (processed.has(dir.directory)) continue;
+        // Check if parent is expanded
+        const parts = dir.directory.split('/');
+        parts.pop();
+        const parentPath = parts.join('/');
 
-        // Check if all parent directories are expanded
-        if (dir.directory !== '(root)') {
-            const parts = dir.directory.split('/');
-            let shouldShow = true;
-
-            for (let i = 1; i < parts.length; i++) {
-                const parentPath = parts.slice(0, i).join('/');
-                if (!expandedDirs.value.has(parentPath)) {
-                    shouldShow = false;
-                    break;
-                }
-            }
-
-            if (!shouldShow) continue;
-        }
-
-        visible.push(dir);
-        processed.add(dir.directory);
-    }
-
-    return visible;
+        return expandedDirs.value.has(parentPath);
+    });
 });
 
-// Check if directory has children
-const hasChildren = (dirPath: string): boolean => {
+const hasChildren = (directory: string) => {
     return props.directories.some(d =>
-        d.directory !== dirPath &&
-        d.directory.startsWith(dirPath + '/')
+        d.directory.startsWith(directory + '/') &&
+        d.directory.split('/').length === directory.split('/').length + 1
     );
 };
 
-// Toggle directory expansion
-const toggleDir = (dirPath: string) => {
-    if (expandedDirs.value.has(dirPath)) {
-        expandedDirs.value.delete(dirPath);
+const toggleDir = (directory: string) => {
+    if (expandedDirs.value.has(directory)) {
+        expandedDirs.value.delete(directory);
     } else {
-        expandedDirs.value.add(dirPath);
+        expandedDirs.value.add(directory);
     }
 };
 
-// Get directory name (last part of path)
-const getDirName = (path: string): string => {
-    if (path === '(root)') return '(root files)';
-    const parts = path.split('/');
-    return parts[parts.length - 1];
+const getDirName = (directory: string) => {
+    const parts = directory.split('/');
+    return parts[parts.length - 1] || directory;
 };
 
-function rescan() {
-    if (isRescanning.value) return;
-    isRescanning.value = true;
-    router.post(`/projects/${props.project.id}/retry-scan`, {}, {
-        preserveScroll: true,
-        onFinish: () => {
-            isRescanning.value = false;
-        },
-    });
-}
-
-function deleteProject() {
-    if (isDeleting.value) return;
+function handleDelete() {
     if (!confirm('Are you sure you want to delete this project? This action cannot be undone.')) {
         return;
     }
+
     isDeleting.value = true;
     router.delete(`/projects/${props.project.id}`, {
         onFinish: () => {
             isDeleting.value = false;
+        },
+    });
+}
+
+function handleRescan() {
+    isRescanning.value = true;
+    router.post(`/projects/${props.project.id}/retry-scan`, {}, {
+        onFinish: () => {
+            isRescanning.value = false;
         },
     });
 }
@@ -238,77 +184,111 @@ function deleteProject() {
     <Head :title="project.repo_name" />
 
     <AppLayout :breadcrumbs="breadcrumbs">
-        <div class="flex h-full flex-1 flex-col gap-6 p-6 md:p-8">
-            <!-- Back Link -->
-            <Link
-                :href="dashboard().url"
-                class="inline-flex w-fit items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
-            >
-                <ArrowLeft class="size-4" />
-                Back to Dashboard
-            </Link>
-
+        <div class="flex h-full flex-1 flex-col gap-6 p-6 md:p-8 lg:p-10">
             <!-- Header -->
-            <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                <div class="space-y-1">
-                    <div class="flex items-center gap-3">
-                        <h1 class="text-2xl font-semibold tracking-tight text-foreground md:text-3xl">
-                            {{ project.repo_name }}
-                        </h1>
-                        <Badge
-                            v-if="project.status === 'ready'"
-                            class="gap-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                        >
-                            <CheckCircle2 class="size-3" />
-                            Ready
-                        </Badge>
-                        <Badge
-                            v-else-if="project.status === 'failed'"
-                            class="gap-1 bg-red-500/10 text-red-600 dark:text-red-400"
-                        >
-                            <AlertCircle class="size-3" />
-                            Failed
-                        </Badge>
+            <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div class="flex items-start gap-4">
+                    <Link
+                        :href="dashboard().url"
+                        class="mt-1 flex items-center text-muted-foreground hover:text-foreground"
+                    >
+                        <ArrowLeft class="size-5" />
+                    </Link>
+                    <div>
+                        <div class="flex items-center gap-3">
+                            <h1 class="text-2xl font-bold">{{ project.repo_name }}</h1>
+                            <Badge
+                                v-if="project.status === 'ready'"
+                                class="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                            >
+                                <CheckCircle2 class="mr-1 size-3" />
+                                Ready
+                            </Badge>
+                            <Badge
+                                v-else-if="project.status === 'failed'"
+                                variant="destructive"
+                            >
+                                <AlertCircle class="mr-1 size-3" />
+                                Failed
+                            </Badge>
+                        </div>
+                        <p class="mt-1 text-muted-foreground">{{ project.owner }}/{{ project.repo_name }}</p>
                     </div>
-                    <p class="text-muted-foreground">{{ project.owner }}/{{ project.repo_name }}</p>
                 </div>
 
-                <div class="flex gap-2">
-                    <Button variant="outline" size="sm" as-child>
-                        <a :href="project.github_url" target="_blank" rel="noopener noreferrer">
-                            <ExternalLink class="mr-2 size-4" />
-                            View on GitHub
-                        </a>
-                    </Button>
-                    <Button variant="outline" size="sm" :disabled="isRescanning" @click="rescan">
-                        <RefreshCw class="mr-2 size-4" :class="{ 'animate-spin': isRescanning }" />
+                <div class="flex flex-wrap items-center gap-2">
+                    <!-- ASK AI BUTTON - Prominent -->
+                    <Link :href="`/projects/${project.id}/ask`">
+                        <Button
+                            size="lg"
+                            class="bg-gradient-to-r from-violet-600 to-indigo-600 text-white hover:from-violet-700 hover:to-indigo-700"
+                        >
+                            <Sparkles class="mr-2 size-4" />
+                            Ask AI
+                        </Button>
+                    </Link>
+
+                    <a
+                        :href="project.github_url"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                    >
+                        <Button variant="outline" size="sm">
+                            <ExternalLink class="mr-1 size-3.5" />
+                            GitHub
+                        </Button>
+                    </a>
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        :disabled="isRescanning"
+                        @click="handleRescan"
+                    >
+                        <RefreshCw class="mr-1 size-3.5" :class="{ 'animate-spin': isRescanning }" />
                         Rescan
                     </Button>
-                    <Button variant="destructive" size="sm" :disabled="isDeleting" @click="deleteProject">
-                        <Trash2 class="mr-2 size-4" />
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        class="text-destructive hover:bg-destructive/10"
+                        :disabled="isDeleting"
+                        @click="handleDelete"
+                    >
+                        <Trash2 class="mr-1 size-3.5" />
                         Delete
                     </Button>
                 </div>
             </div>
 
-            <!-- Error Message -->
-            <div
-                v-if="project.status === 'failed' && project.last_error"
-                class="rounded-lg border border-red-500/30 bg-red-500/10 p-4"
-            >
-                <div class="flex items-start gap-3">
-                    <AlertCircle class="mt-0.5 size-5 text-red-500" />
-                    <div>
-                        <p class="font-medium text-red-600 dark:text-red-400">Scan Failed</p>
-                        <p class="mt-1 text-sm text-red-600/80 dark:text-red-400/80">
-                            {{ project.last_error }}
-                        </p>
+            <!-- Ask AI Feature Card -->
+            <div class="rounded-xl border-2 border-violet-500/20 bg-gradient-to-r from-violet-500/5 to-indigo-500/5 p-6">
+                <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                    <div class="flex items-start gap-4">
+                        <div class="flex size-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-500">
+                            <Bot class="size-6 text-white" />
+                        </div>
+                        <div>
+                            <h2 class="text-lg font-semibold">Ask AI about this codebase</h2>
+                            <p class="text-sm text-muted-foreground">
+                                Get instant answers about code structure, patterns, routes, and more.
+                                All responses are grounded in your actual code with full citations.
+                            </p>
+                        </div>
                     </div>
+                    <Link :href="`/projects/${project.id}/ask`">
+                        <Button
+                            size="lg"
+                            class="whitespace-nowrap bg-gradient-to-r from-violet-600 to-indigo-600 text-white hover:from-violet-700 hover:to-indigo-700"
+                        >
+                            <MessageSquare class="mr-2 size-4" />
+                            Start Conversation
+                        </Button>
+                    </Link>
                 </div>
             </div>
 
-            <!-- Stats Grid -->
-            <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <!-- Stats Cards -->
+            <div class="grid gap-4 md:grid-cols-4">
                 <div class="rounded-xl border bg-card p-4">
                     <div class="flex items-center gap-3">
                         <div class="flex size-10 items-center justify-center rounded-lg bg-blue-500/10">
@@ -348,39 +328,36 @@ function deleteProject() {
                 <div class="rounded-xl border bg-card p-4">
                     <div class="flex items-center gap-3">
                         <div class="flex size-10 items-center justify-center rounded-lg bg-violet-500/10">
-                            <Sparkles class="size-5 text-violet-500" />
+                            <GitCommit class="size-5 text-violet-500" />
                         </div>
                         <div>
-                            <p class="text-sm text-muted-foreground">Directories</p>
-                            <p class="text-xl font-semibold">{{ formatNumber(directories.length) }}</p>
+                            <p class="text-sm text-muted-foreground">Last Commit</p>
+                            <p class="text-xl font-semibold font-mono">{{ shortSha }}</p>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Info Grid -->
+            <!-- Details Grid -->
             <div class="grid gap-6 lg:grid-cols-3">
-                <!-- Project Details -->
-                <div class="rounded-xl border bg-card p-5 lg:col-span-1">
+                <!-- Project Info -->
+                <div class="rounded-xl border bg-card p-5">
                     <h2 class="mb-4 flex items-center gap-2 font-semibold">
                         <GitBranch class="size-4" />
-                        Project Details
+                        Project Info
                     </h2>
                     <dl class="space-y-3 text-sm">
                         <div class="flex justify-between">
-                            <dt class="text-muted-foreground">Default Branch</dt>
-                            <dd class="font-medium">{{ project.default_branch }}</dd>
+                            <dt class="text-muted-foreground">Branch</dt>
+                            <dd class="font-mono">{{ project.default_branch }}</dd>
                         </div>
                         <div class="flex justify-between">
-                            <dt class="text-muted-foreground">Last Commit</dt>
-                            <dd class="flex items-center gap-1.5 font-mono text-xs">
-                                <GitCommit class="size-3.5" />
-                                {{ shortSha }}
-                            </dd>
+                            <dt class="text-muted-foreground">Provider</dt>
+                            <dd>GitHub</dd>
                         </div>
-                        <div class="flex justify-between">
-                            <dt class="text-muted-foreground">Last Scanned</dt>
-                            <dd class="flex items-center gap-1.5">
+                        <div class="flex items-center justify-between">
+                            <dt class="text-muted-foreground">Last Scan</dt>
+                            <dd class="flex items-center gap-1.5 text-xs">
                                 <Calendar class="size-3.5" />
                                 {{ formatDate(project.scanned_at) }}
                             </dd>
@@ -455,7 +432,6 @@ function deleteProject() {
                             :style="{ paddingLeft: `${(dir.depth || 0) * 16 + 8}px` }"
                         >
                             <div class="flex items-center gap-1.5">
-                                <!-- Expand/Collapse toggle -->
                                 <button
                                     v-if="hasChildren(dir.directory)"
                                     class="flex size-5 items-center justify-center rounded hover:bg-muted"
