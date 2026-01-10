@@ -1,20 +1,17 @@
 <script setup lang="ts">
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { show } from '@/routes/projects';
 import { type Project } from '@/types';
+import { Link } from '@inertiajs/vue3';
 import {
     CheckCircle2,
     ChevronRight,
     Clock,
     FileCode,
     GitBranch,
-    Lock,
     Sparkles,
 } from 'lucide-vue-next';
 import { computed } from 'vue';
-
-// NOTE: Add this import once you create the projects.show route:
-// import { show } from '@/routes/projects';
 
 interface Props {
     project: Project;
@@ -24,7 +21,8 @@ const props = defineProps<Props>();
 
 // Generate avatar initials from repo name
 const avatarInitials = computed(() => {
-    const parts = props.project.name?.split('/') || ['?'];
+    const name = props.project.name || props.project.repo_full_name;
+    const parts = name.split('/');
     const repoName = parts[parts.length - 1] || '?';
     return repoName.substring(0, 2).toUpperCase();
 });
@@ -38,10 +36,10 @@ const avatarGradient = computed(() => {
         'from-pink-500 to-rose-500',
         'from-cyan-500 to-blue-500',
     ];
-    const hash =
-        props.project.name
-            ?.split('')
-            .reduce((acc, char) => acc + char.charCodeAt(0), 0) || 0;
+    const name = props.project.name || props.project.repo_full_name;
+    const hash = name
+        .split('')
+        .reduce((acc, char) => acc + char.charCodeAt(0), 0);
     return gradients[hash % gradients.length];
 });
 
@@ -59,50 +57,77 @@ const formatRelativeTime = (date: string) => {
     if (minutes > 0) return `${minutes}m ago`;
     return 'Just now';
 };
+
+// Format file size
+const formatSize = (bytes: number) => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+};
+
+// Format number with K/M suffix
+const formatNumber = (num: number) => {
+    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+    if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+    return num.toString();
+};
+
+// Get stack badges to display
+const stackBadges = computed(() => {
+    const badges: string[] = [];
+    const stack = props.project.stack_info;
+
+    if (!stack) return badges;
+
+    if (stack.framework) {
+        badges.push(stack.framework);
+    }
+    if (stack.frontend?.length) {
+        badges.push(...stack.frontend.slice(0, 2));
+    }
+    if (stack.css?.length) {
+        badges.push(stack.css[0]);
+    }
+
+    return [...new Set(badges)].slice(0, 4);
+});
 </script>
 
 <template>
-    <!--
-        TODO: Wrap with <Link :href="show({ project: project.id })">
-        once you add the projects.show route
-    -->
-    <div class="group block cursor-pointer">
+    <Link :href="show({ project: project.id })" class="group block">
         <div
             class="relative overflow-hidden rounded-xl border border-border/50 bg-card p-5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-border hover:shadow-md"
         >
             <!-- Subtle hover gradient -->
             <div
-                class="absolute inset-0 bg-gradient-to-br from-violet-500/[0.02] to-indigo-500/[0.02] opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+                class="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100"
             ></div>
 
             <div class="relative">
-                <!-- Header -->
-                <div class="mb-4 flex items-start gap-4">
-                    <!-- Repository Avatar -->
+                <!-- Header Row -->
+                <div class="mb-4 flex items-start gap-3">
+                    <!-- Avatar -->
                     <div
-                        class="flex size-11 shrink-0 items-center justify-center rounded-lg text-sm font-semibold text-white shadow-sm transition-transform duration-200 group-hover:scale-105"
-                        :class="`bg-gradient-to-br ${avatarGradient}`"
+                        class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br text-sm font-semibold text-white shadow-sm"
+                        :class="avatarGradient"
                     >
                         {{ avatarInitials }}
                     </div>
 
                     <div class="min-w-0 flex-1">
-                        <h3
-                            class="truncate font-semibold text-foreground transition-colors duration-200 group-hover:text-violet-600 dark:group-hover:text-violet-400"
+                        <div class="flex items-center gap-2">
+                            <h3 class="truncate font-semibold text-foreground">
+                                {{ project.name || project.repo_full_name }}
+                            </h3>
+                        </div>
+                        <div
+                            class="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground"
                         >
-                            {{ project.name }}
-                        </h3>
-                        <div class="mt-1 flex items-center gap-2">
-                            <Badge
-                                v-if="project.private"
-                                variant="secondary"
-                                class="gap-1 text-xs"
-                            >
-                                <Lock class="size-3" />
-                                Private
-                            </Badge>
+                            <span class="truncate">{{ project.owner }}</span>
                             <span
-                                class="flex items-center gap-1 text-xs text-muted-foreground"
+                                class="inline-flex items-center gap-1 rounded bg-muted/50 px-1.5 py-0.5"
                             >
                                 <GitBranch class="size-3" />
                                 {{ project.default_branch || 'main' }}
@@ -119,13 +144,20 @@ const formatRelativeTime = (date: string) => {
                     </div>
                 </div>
 
-                <!-- Description -->
-                <p
-                    v-if="project.description"
-                    class="mb-4 line-clamp-2 text-sm text-muted-foreground"
+                <!-- Stack Badges -->
+                <div
+                    v-if="stackBadges.length > 0"
+                    class="mb-4 flex flex-wrap gap-1.5"
                 >
-                    {{ project.description }}
-                </p>
+                    <Badge
+                        v-for="badge in stackBadges"
+                        :key="badge"
+                        variant="secondary"
+                        class="text-xs capitalize"
+                    >
+                        {{ badge }}
+                    </Badge>
+                </div>
 
                 <!-- Stats row -->
                 <div
@@ -133,20 +165,24 @@ const formatRelativeTime = (date: string) => {
                 >
                     <div class="flex items-center gap-1.5">
                         <FileCode class="size-3.5" />
-                        <span>{{ project.files_count || '—' }} files</span>
+                        <span
+                            >{{
+                                formatNumber(project.total_files || 0)
+                            }}
+                            files</span
+                        >
+                    </div>
+                    <div
+                        v-if="project.total_lines"
+                        class="flex items-center gap-1.5"
+                    >
+                        <span
+                            >{{ formatNumber(project.total_lines) }} lines</span
+                        >
                     </div>
                     <div class="flex items-center gap-1.5">
                         <Sparkles class="size-3.5 text-violet-500" />
                         <span>AI indexed</span>
-                    </div>
-                    <div
-                        v-if="project.updated_at"
-                        class="flex items-center gap-1.5"
-                    >
-                        <Clock class="size-3.5" />
-                        <span>{{
-                            formatRelativeTime(project.updated_at)
-                        }}</span>
                     </div>
                 </div>
 
@@ -154,33 +190,26 @@ const formatRelativeTime = (date: string) => {
                 <div
                     class="flex items-center justify-between border-t border-border/50 pt-4"
                 >
-                    <!-- Stack badges -->
-                    <div class="flex items-center gap-1.5">
-                        <Badge
-                            v-for="tech in (
-                                project.stack || ['Vue', 'Laravel']
-                            ).slice(0, 3)"
-                            :key="tech"
-                            variant="outline"
-                            class="text-xs font-normal"
-                        >
-                            {{ tech }}
-                        </Badge>
+                    <div
+                        class="flex items-center gap-1.5 text-xs text-muted-foreground"
+                    >
+                        <Clock class="size-3.5" />
+                        <span v-if="project.scanned_at">
+                            Scanned {{ formatRelativeTime(project.scanned_at) }}
+                        </span>
+                        <span v-else>
+                            Added {{ formatRelativeTime(project.created_at) }}
+                        </span>
                     </div>
 
-                    <!-- Open button -->
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        class="gap-1 text-muted-foreground group-hover:text-foreground"
+                    <div
+                        class="flex items-center gap-1 text-xs font-medium text-primary opacity-0 transition-opacity duration-200 group-hover:opacity-100"
                     >
-                        Open
-                        <ChevronRight
-                            class="size-4 transition-transform duration-200 group-hover:translate-x-0.5"
-                        />
-                    </Button>
+                        View Details
+                        <ChevronRight class="size-3.5" />
+                    </div>
                 </div>
             </div>
         </div>
-    </div>
+    </Link>
 </template>
