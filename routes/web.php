@@ -39,4 +39,5 @@ Route::middleware(['auth', 'verified'])->group(function () {
         ->name('settings.social-accounts.destroy');
 });
 
+Route::get('/projects/{project}', [ProjectController::class, 'show'])->name('projects.show');
 require __DIR__ . '/settings.php';

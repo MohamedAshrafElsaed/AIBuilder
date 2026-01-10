@@ -1,0 +1,178 @@
+/**
+ * AI Dashboard - Shimmer & Animation Utilities
+ * Add this to your global CSS (e.g., resources/css/app.css)
+ */
+
+/* ============================================
+   CSS Custom Property for Shimmer Angle
+   ============================================ */
+@property --shimmer-angle {
+    syntax: '<angle>';
+    initial-value: 0deg;
+    inherits: false;
+}
+
+/* ============================================
+   Shimmer Border Animation
+   Use on cards that are actively processing
+   ============================================ */
+.shimmer-border {
+    position: relative;
+    overflow: hidden;
+}
+
+.shimmer-border::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    background: conic-gradient(
+        from var(--shimmer-angle),
+        transparent 0%,
+        theme('colors.violet.500') 10%,
+        transparent 20%
+    );
+    animation: shimmer-spin 4s linear infinite;
+    opacity: 0.3;
+    pointer-events: none;
+}
+
+/* Inner background to mask the shimmer */
+.shimmer-border::after {
+    content: '';
+    position: absolute;
+    inset: 1px;
+    border-radius: calc(inherit - 1px);
+    background: inherit;
+    pointer-events: none;
+}
+
+@keyframes shimmer-spin {
+    from {
+        --shimmer-angle: 0deg;
+    }
+    to {
+        --shimmer-angle: 360deg;
+    }
+}
+
+/* ============================================
+   Skeleton Shimmer (for loading states)
+   ============================================ */
+.shimmer-skeleton {
+    position: relative;
+    overflow: hidden;
+}
+
+.shimmer-skeleton::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+        90deg,
+        transparent,
+        rgba(255, 255, 255, 0.1),
+        transparent
+    );
+    animation: shimmer-slide 2s infinite;
+}
+
+@keyframes shimmer-slide {
+    100% {
+        transform: translateX(100%);
+    }
+}
+
+/* ============================================
+   Check Pop Animation
+   ============================================ */
+@keyframes check-pop {
+    0% {
+        transform: scale(0);
+        opacity: 0;
+    }
+    50% {
+        transform: scale(1.2);
+    }
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+.animate-check-pop {
+    animation: check-pop 0.3s ease-out;
+}
+
+/* ============================================
+   Fade Slide Up (for staggered card entrance)
+   ============================================ */
+@keyframes fade-slide-up {
+    from {
+        opacity: 0;
+        transform: translateY(16px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.animate-fade-slide-up {
+    animation: fade-slide-up 0.5s ease-out forwards;
+}
+
+/* Stagger delay utilities */
+.animate-delay-75 { animation-delay: 75ms; }
+.animate-delay-150 { animation-delay: 150ms; }
+.animate-delay-225 { animation-delay: 225ms; }
+.animate-delay-300 { animation-delay: 300ms; }
+.animate-delay-375 { animation-delay: 375ms; }
+.animate-delay-450 { animation-delay: 450ms; }
+
+/* ============================================
+   AI Pulse Indicator
+   ============================================ */
+.ai-pulse {
+    position: relative;
+    display: flex;
+    height: 0.5rem;
+    width: 0.5rem;
+}
+
+.ai-pulse::before {
+    content: '';
+    position: absolute;
+    display: inline-flex;
+    height: 100%;
+    width: 100%;
+    border-radius: 9999px;
+    background-color: theme('colors.violet.400');
+    opacity: 0.75;
+    animation: ping 1s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+.ai-pulse::after {
+    content: '';
+    position: relative;
+    display: inline-flex;
+    height: 0.5rem;
+    width: 0.5rem;
+    border-radius: 9999px;
+    background-color: theme('colors.violet.500');
+}
+
+@keyframes ping {
+    75%, 100% {
+        transform: scale(2);
+        opacity: 0;
+    }
+}
+
+/* ============================================
+   Progress Bar Glow
+   ============================================ */
+.progress-glow {
+    box-shadow: 0 0 8px theme('colors.violet.500 / 50%');
+}
