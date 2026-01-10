@@ -2,8 +2,11 @@
 
 namespace App\Models;
 
+use Eloquent;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Carbon;
 
 /**
  * @property int $id
@@ -13,22 +16,22 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string|null $provider_email
  * @property string|null $avatar
  * @property array<array-key, mixed>|null $provider_data
- * @property \Illuminate\Support\Carbon|null $created_at
- * @property \Illuminate\Support\Carbon|null $updated_at
- * @property-read \App\Models\User $user
- * @method static \Illuminate\Database\Eloquent\Builder<static>|SocialAccount newModelQuery()
- * @method static \Illuminate\Database\Eloquent\Builder<static>|SocialAccount newQuery()
- * @method static \Illuminate\Database\Eloquent\Builder<static>|SocialAccount query()
- * @method static \Illuminate\Database\Eloquent\Builder<static>|SocialAccount whereAvatar($value)
- * @method static \Illuminate\Database\Eloquent\Builder<static>|SocialAccount whereCreatedAt($value)
- * @method static \Illuminate\Database\Eloquent\Builder<static>|SocialAccount whereId($value)
- * @method static \Illuminate\Database\Eloquent\Builder<static>|SocialAccount whereProvider($value)
- * @method static \Illuminate\Database\Eloquent\Builder<static>|SocialAccount whereProviderData($value)
- * @method static \Illuminate\Database\Eloquent\Builder<static>|SocialAccount whereProviderEmail($value)
- * @method static \Illuminate\Database\Eloquent\Builder<static>|SocialAccount whereProviderId($value)
- * @method static \Illuminate\Database\Eloquent\Builder<static>|SocialAccount whereUpdatedAt($value)
- * @method static \Illuminate\Database\Eloquent\Builder<static>|SocialAccount whereUserId($value)
- * @mixin \Eloquent
+ * @property Carbon|null $created_at
+ * @property Carbon|null $updated_at
+ * @property-read User $user
+ * @method static Builder<static>|SocialAccount newModelQuery()
+ * @method static Builder<static>|SocialAccount newQuery()
+ * @method static Builder<static>|SocialAccount query()
+ * @method static Builder<static>|SocialAccount whereAvatar($value)
+ * @method static Builder<static>|SocialAccount whereCreatedAt($value)
+ * @method static Builder<static>|SocialAccount whereId($value)
+ * @method static Builder<static>|SocialAccount whereProvider($value)
+ * @method static Builder<static>|SocialAccount whereProviderData($value)
+ * @method static Builder<static>|SocialAccount whereProviderEmail($value)
+ * @method static Builder<static>|SocialAccount whereProviderId($value)
+ * @method static Builder<static>|SocialAccount whereUpdatedAt($value)
+ * @method static Builder<static>|SocialAccount whereUserId($value)
+ * @mixin Eloquent
  */
 class SocialAccount extends Model
 {
@@ -64,7 +67,7 @@ class SocialAccount extends Model
 
     public function hasValidToken(): bool
     {
-        if (! $this->access_token) {
+        if (!$this->access_token) {
             return false;
         }
 

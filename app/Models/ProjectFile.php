@@ -12,15 +12,23 @@ class ProjectFile extends Model
 {
     /** @use HasFactory<ProjectFileFactory> */
     use HasFactory;
+
     protected $fillable = [
         'project_id',
+        'file_id',
         'path',
         'extension',
+        'language',
         'size_bytes',
         'sha1',
         'line_count',
         'is_binary',
+        'is_excluded',
+        'exclusion_reason',
         'mime_type',
+        'framework_hints',
+        'symbols_declared',
+        'imports',
         'file_modified_at',
     ];
 
@@ -28,6 +36,10 @@ class ProjectFile extends Model
     {
         return [
             'is_binary' => 'boolean',
+            'is_excluded' => 'boolean',
+            'framework_hints' => 'array',
+            'symbols_declared' => 'array',
+            'imports' => 'array',
             'file_modified_at' => 'datetime',
         ];
     }
@@ -43,13 +55,110 @@ class ProjectFile extends Model
             ->where('project_id', $this->project_id);
     }
 
+    // -------------------------------------------------------------------------
+    // Accessors
+    // -------------------------------------------------------------------------
+
     public function getDirectoryAttribute(): string
     {
-        return dirname($this->path) ?: '.';
+        $dir = dirname($this->path);
+        return $dir === '.' ? '(root)' : $dir;
     }
 
     public function getFilenameAttribute(): string
     {
         return basename($this->path);
+    }
+
+    public function getChunkCountAttribute(): int
+    {
+        return $this->chunks()->count();
+    }
+
+    public function getChunkIdsAttribute(): array
+    {
+        return $this->chunks()->orderBy('start_line')->pluck('chunk_id')->toArray();
+    }
+
+    // -------------------------------------------------------------------------
+    // Scopes
+    // -------------------------------------------------------------------------
+
+    public function scopeIncluded($query)
+    {
+        return $query->where('is_excluded', false);
+    }
+
+    public function scopeExcluded($query)
+    {
+        return $query->where('is_excluded', true);
+    }
+
+    public function scopeBinary($query)
+    {
+        return $query->where('is_binary', true);
+    }
+
+    public function scopeNonBinary($query)
+    {
+        return $query->where('is_binary', false);
+    }
+
+    public function scopeByLanguage($query, string $language)
+    {
+        return $query->where('language', $language);
+    }
+
+    public function scopeByExtension($query, string $extension)
+    {
+        return $query->where('extension', $extension);
+    }
+
+    public function scopeInDirectory($query, string $directory)
+    {
+        return $query->where('path', 'like', $directory . '/%');
+    }
+
+    public function scopeWithFrameworkHint($query, string $hint)
+    {
+        return $query->whereJsonContains('framework_hints', $hint);
+    }
+
+    // -------------------------------------------------------------------------
+    // Helper Methods
+    // -------------------------------------------------------------------------
+
+    public function hasFrameworkHint(string $hint): bool
+    {
+        return in_array($hint, $this->framework_hints ?? [], true);
+    }
+
+    public function isChunked(): bool
+    {
+        return $this->chunks()->count() > 0;
+    }
+
+    public function getFullPath(Project $project): string
+    {
+        return $project->repo_path . '/' . $this->path;
+    }
+
+    public function getContent(Project $project): ?string
+    {
+        $fullPath = $this->getFullPath($project);
+
+        if (!file_exists($fullPath)) {
+            return null;
+        }
+
+        return @file_get_contents($fullPath);
+    }
+
+    /**
+     * Generate stable file_id from path
+     */
+    public static function generateFileId(string $path): string
+    {
+        return 'f_' . substr(sha1($path), 0, 12);
     }
 }

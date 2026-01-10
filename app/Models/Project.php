@@ -7,7 +7,6 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Support\Facades\Storage;
 
 class Project extends Model
 {
@@ -20,11 +19,16 @@ class Project extends Model
         'repo_full_name',
         'repo_id',
         'default_branch',
+        'selected_branch',
         'status',
         'current_stage',
         'stage_percent',
         'scanned_at',
         'last_commit_sha',
+        'parent_commit_sha',
+        'scan_output_version',
+        'exclusion_rules_version',
+        'last_migration_at',
         'last_error',
         'stack_info',
         'total_files',
@@ -36,9 +40,14 @@ class Project extends Model
     {
         return [
             'scanned_at' => 'datetime',
+            'last_migration_at' => 'datetime',
             'stack_info' => 'array',
         ];
     }
+
+    // -------------------------------------------------------------------------
+    // Relationships
+    // -------------------------------------------------------------------------
 
     public function user(): BelongsTo
     {
@@ -65,6 +74,10 @@ class Project extends Model
         return $this->scans()->latest()->first();
     }
 
+    // -------------------------------------------------------------------------
+    // Path Accessors
+    // -------------------------------------------------------------------------
+
     public function getStoragePathAttribute(): string
     {
         return config('projects.storage_path') . '/' . $this->id;
@@ -90,6 +103,10 @@ class Project extends Model
         return $this->knowledge_path . '/indexes';
     }
 
+    // -------------------------------------------------------------------------
+    // Repository Accessors
+    // -------------------------------------------------------------------------
+
     public function getOwnerAttribute(): string
     {
         return explode('/', $this->repo_full_name)[0] ?? '';
@@ -99,6 +116,15 @@ class Project extends Model
     {
         return explode('/', $this->repo_full_name)[1] ?? $this->repo_full_name;
     }
+
+    public function getActiveBranchAttribute(): string
+    {
+        return $this->selected_branch ?? $this->default_branch;
+    }
+
+    // -------------------------------------------------------------------------
+    // Status Checks
+    // -------------------------------------------------------------------------
 
     public function isScanning(): bool
     {
@@ -119,6 +145,20 @@ class Project extends Model
     {
         return $this->status === 'pending';
     }
+
+    public function needsMigration(): bool
+    {
+        return $this->scan_output_version === null || version_compare($this->scan_output_version, '2.0.0', '<');
+    }
+
+    public function hasLocalRepo(): bool
+    {
+        return is_dir($this->repo_path . '/.git');
+    }
+
+    // -------------------------------------------------------------------------
+    // Status Updates
+    // -------------------------------------------------------------------------
 
     public function markScanning(string $stage = 'workspace', int $percent = 0): void
     {
@@ -158,6 +198,10 @@ class Project extends Model
         ]);
     }
 
+    // -------------------------------------------------------------------------
+    // Stats Updates
+    // -------------------------------------------------------------------------
+
     public function updateStats(int $files, int $lines, int $bytes): void
     {
         $this->update([
@@ -172,6 +216,18 @@ class Project extends Model
         $this->update(['stack_info' => $stack]);
     }
 
+    public function updateScanVersion(string $version, string $rulesVersion): void
+    {
+        $this->update([
+            'scan_output_version' => $version,
+            'exclusion_rules_version' => $rulesVersion,
+        ]);
+    }
+
+    // -------------------------------------------------------------------------
+    // GitHub URLs
+    // -------------------------------------------------------------------------
+
     public function getGitHubCloneUrl(): string
     {
         return 'https://github.com/' . $this->repo_full_name . '.git';
@@ -182,10 +238,44 @@ class Project extends Model
         return 'https://github.com/' . $this->repo_full_name;
     }
 
-    public function hasLocalRepo(): bool
+    public function getGitHubFileUrl(string $path, ?int $line = null): string
     {
-        return is_dir($this->repo_path . '/.git');
+        $url = $this->getGitHubUrl() . '/blob/' . $this->active_branch . '/' . $path;
+
+        if ($line !== null) {
+            $url .= '#L' . $line;
+        }
+
+        return $url;
     }
+
+    // -------------------------------------------------------------------------
+    // File/Chunk Queries
+    // -------------------------------------------------------------------------
+
+    public function getIncludedFiles()
+    {
+        return $this->files()->where('is_excluded', false);
+    }
+
+    public function getExcludedFiles()
+    {
+        return $this->files()->where('is_excluded', true);
+    }
+
+    public function getFilesByLanguage(string $language)
+    {
+        return $this->files()->where('language', $language)->where('is_excluded', false);
+    }
+
+    public function getChunksForFile(string $path)
+    {
+        return $this->chunks()->where('path', $path)->orderBy('start_line');
+    }
+
+    // -------------------------------------------------------------------------
+    // Cleanup
+    // -------------------------------------------------------------------------
 
     public function cleanupStorage(): void
     {

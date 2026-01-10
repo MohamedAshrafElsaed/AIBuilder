@@ -7,7 +7,9 @@ use App\Models\ProjectScan;
 use App\Services\Projects\ChunkBuilder;
 use App\Services\Projects\GitService;
 use App\Services\Projects\ProgressReporter;
+use App\Services\Projects\RoutesExtractor;
 use App\Services\Projects\ScannerService;
+use App\Services\Projects\ScanOutputBuilder;
 use App\Services\Projects\StackDetector;
 use Exception;
 use Illuminate\Bus\Queueable;
@@ -26,17 +28,22 @@ class ScanProjectPipelineJob implements ShouldQueue
     public int $backoff = 60;
 
     public function __construct(
-        public int $projectId,
+        public int    $projectId,
         public string $trigger = 'manual',
-    ) {}
+        public bool   $forceFull = false,
+    )
+    {
+    }
 
     public function handle(
-        GitService $git,
-        ScannerService $scanner,
-        StackDetector $stackDetector,
-        ChunkBuilder $chunkBuilder,
+        GitService       $git,
+        ScannerService   $scanner,
+        StackDetector    $stackDetector,
+        ChunkBuilder     $chunkBuilder,
         ProgressReporter $progress,
-    ): void {
+        RoutesExtractor  $routesExtractor,
+    ): void
+    {
         $project = Project::find($this->projectId);
 
         if (!$project) {
@@ -50,18 +57,32 @@ class ScanProjectPipelineJob implements ShouldQueue
             'status' => 'running',
             'trigger' => $this->trigger,
             'started_at' => now(),
+            'scanner_version' => '2.0.0',
         ]);
 
         // Start scanning
         $project->markScanning('workspace', 0);
 
         try {
-            $commitSha = $this->runPipeline($project, $scan, $git, $scanner, $stackDetector, $chunkBuilder, $progress);
-            $progress->complete($project, $scan, $commitSha);
+            $result = $this->runPipeline(
+                $project,
+                $scan,
+                $git,
+                $scanner,
+                $stackDetector,
+                $chunkBuilder,
+                $progress,
+                $routesExtractor,
+            );
+
+            $progress->complete($project, $scan, $result['commit_sha']);
 
             Log::info('ScanProjectPipelineJob: Completed successfully', [
                 'project_id' => $project->id,
-                'commit_sha' => $commitSha,
+                'commit_sha' => $result['commit_sha'],
+                'total_files' => $result['total_files'],
+                'total_chunks' => $result['total_chunks'],
+                'excluded_files' => $result['excluded_files'],
             ]);
         } catch (Exception $e) {
             Log::error('ScanProjectPipelineJob: Failed', [
@@ -77,14 +98,18 @@ class ScanProjectPipelineJob implements ShouldQueue
     }
 
     private function runPipeline(
-        Project $project,
-        ProjectScan $scan,
-        GitService $git,
-        ScannerService $scanner,
-        StackDetector $stackDetector,
-        ChunkBuilder $chunkBuilder,
+        Project          $project,
+        ProjectScan      $scan,
+        GitService       $git,
+        ScannerService   $scanner,
+        StackDetector    $stackDetector,
+        ChunkBuilder     $chunkBuilder,
         ProgressReporter $progress,
-    ): string {
+        RoutesExtractor  $routesExtractor,
+    ): array
+    {
+        $startTime = microtime(true);
+
         // Stage 1: Workspace
         $progress->startStage($project, $scan, 'workspace');
         $git->ensureWorkspace($project);
@@ -99,16 +124,29 @@ class ScanProjectPipelineJob implements ShouldQueue
 
         // Stage 3: Build File Manifest
         $progress->startStage($project, $scan, 'manifest');
-        $result = $scanner->scanDirectory($project, function($processed, $total) use ($project, $scan, $progress) {
-            $percent = $total > 0 ? (int) (($processed / $total) * 100) : 0;
+        $result = $scanner->scanDirectory($project, function ($processed, $total) use ($project, $scan, $progress) {
+            $percent = $total > 0 ? (int)(($processed / $total) * 100) : 0;
             $progress->updateStage($project, $scan, 'manifest', $percent);
         });
+
+        // Persist manifest with new fields
         $scanner->persistManifest($project, $result['files']);
+
+        // Update project stats
         $project->updateStats(
             $result['stats']['total_files'],
             $result['stats']['total_lines'],
             $result['stats']['total_bytes']
         );
+
+        // Store exclusion rules version
+        $project->update([
+            'exclusion_rules_version' => $result['exclusion_rules_version'] ?? null,
+        ]);
+
+        // Save exclusion log for debugging
+        $this->saveExclusionLog($project, $result['exclusion_log'] ?? []);
+
         $progress->completeStage($project, $scan, 'manifest');
 
         // Stage 4: Detect Stack
@@ -120,18 +158,51 @@ class ScanProjectPipelineJob implements ShouldQueue
 
         // Stage 5: Build Knowledge Chunks
         $progress->startStage($project, $scan, 'chunks');
-        $chunkBuilder->build($project, function($processed, $total) use ($project, $scan, $progress) {
-            $percent = $total > 0 ? (int) (($processed / $total) * 100) : 0;
+        $chunkResult = $chunkBuilder->build($project, function ($processed, $total) use ($project, $scan, $progress) {
+            $percent = $total > 0 ? (int)(($processed / $total) * 100) : 0;
             $progress->updateStage($project, $scan, 'chunks', $percent);
         });
         $progress->completeStage($project, $scan, 'chunks');
 
         // Stage 6: Finalize
         $progress->startStage($project, $scan, 'finalize');
-        $this->saveRoutes($project);
+
+        // Extract routes from all route files recursively
+        $routes = $routesExtractor->save($project);
+
+        // Generate comprehensive scan output
+        $outputBuilder = new ScanOutputBuilder($project);
+        $scanOutput = $outputBuilder->build();
+        $outputPath = $project->knowledge_path . '/scan_output.json';
+        file_put_contents($outputPath, json_encode($scanOutput, JSON_PRETTY_PRINT));
+
+        // Update scan record with stats
+        $scan->update([
+            'files_scanned' => $result['stats']['total_files'],
+            'files_excluded' => $result['stats']['excluded_count'] ?? 0,
+            'chunks_created' => $chunkResult['total_chunks'] ?? 0,
+            'total_lines' => $result['stats']['total_lines'],
+            'total_bytes' => $result['stats']['total_bytes'],
+            'duration_ms' => (int)((microtime(true) - $startTime) * 1000),
+        ]);
+
+        // Update project metadata
+        $project->update([
+            'scan_output_version' => '2.0.0',
+            'last_commit_sha' => $commitSha,
+            'scanned_at' => now(),
+        ]);
+
         $progress->completeStage($project, $scan, 'finalize');
 
-        return $commitSha;
+        return [
+            'commit_sha' => $commitSha,
+            'total_files' => $result['stats']['total_files'],
+            'total_chunks' => $chunkResult['total_chunks'] ?? 0,
+            'excluded_files' => $result['stats']['excluded_count'] ?? 0,
+            'routes_files' => count($routes),
+            'duration_ms' => (int)((microtime(true) - $startTime) * 1000),
+        ];
     }
 
     private function getGitHubToken(Project $project): string
@@ -146,50 +217,18 @@ class ScanProjectPipelineJob implements ShouldQueue
         return $account->access_token;
     }
 
-    private function saveRoutes(Project $project): void
+    private function saveExclusionLog(Project $project, array $exclusionLog): void
     {
-        $repoPath = $project->repo_path;
-        $routesDir = $repoPath . '/routes';
-
-        if (!is_dir($routesDir)) {
+        if (empty($exclusionLog)) {
             return;
         }
 
-        $routes = [];
-        $routeFiles = ['web.php', 'api.php', 'channels.php', 'console.php'];
-
-        foreach ($routeFiles as $routeFile) {
-            $path = $routesDir . '/' . $routeFile;
-            if (file_exists($path)) {
-                $content = file_get_contents($path);
-                $routes[str_replace('.php', '', $routeFile)] = $this->extractRouteInfo($content);
-            }
-        }
-
-        $routesPath = $project->knowledge_path . '/routes.json';
-        file_put_contents($routesPath, json_encode($routes, JSON_PRETTY_PRINT));
-    }
-
-    private function extractRouteInfo(string $content): array
-    {
-        $routes = [];
-
-        // Match Route::get/post/etc patterns
-        preg_match_all(
-            "/Route::(get|post|put|patch|delete|any|match|resource|apiResource)\s*\(\s*['\"]([^'\"]+)['\"]/",
-            $content,
-            $matches,
-            PREG_SET_ORDER
-        );
-
-        foreach ($matches as $match) {
-            $routes[] = [
-                'method' => strtoupper($match[1]),
-                'uri' => $match[2],
-            ];
-        }
-
-        return $routes;
+        $logPath = $project->knowledge_path . '/exclusion_log.json';
+        file_put_contents($logPath, json_encode([
+            'generated_at' => now()->toIso8601String(),
+            'total_excluded' => count($exclusionLog),
+            'entries' => $exclusionLog,
+        ], JSON_PRETTY_PRINT));
     }
 
     public function failed(Exception $exception): void
