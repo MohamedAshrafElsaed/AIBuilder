@@ -44,7 +44,6 @@ class AskAIService
         try {
             // Retrieve relevant chunks
             $retrievalResult = $this->retrieval->retrieve($project, $question, 'deep');
-            dd($retrievalResult);
             $chunks = $retrievalResult['chunks'];
 
             Log::info('AskAI: Retrieved chunks', [
