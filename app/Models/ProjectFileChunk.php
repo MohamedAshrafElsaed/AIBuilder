@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\Projects\Concerns\HasDeterministicChunkId;
 use Database\Factories\ProjectFileChunkFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -11,6 +12,7 @@ class ProjectFileChunk extends Model
 {
     /** @use HasFactory<ProjectFileChunkFactory> */
     use HasFactory;
+    use HasDeterministicChunkId;
 
     protected $fillable = [
         'project_id',
@@ -101,7 +103,7 @@ class ProjectFileChunk extends Model
     // -------------------------------------------------------------------------
 
     /**
-     * Get the content of this chunk from the repository
+     * Get the content of this chunk from the repository.
      */
     public function getContent(Project $project): ?string
     {
@@ -117,13 +119,22 @@ class ProjectFileChunk extends Model
         }
 
         $lines = explode("\n", $content);
-        $chunkLines = array_slice($lines, $this->start_line - 1, $this->end_line - $this->start_line + 1);
+
+        // Validate line numbers
+        $startLine = max(1, $this->start_line);
+        $endLine = min(count($lines), $this->end_line);
+
+        if ($startLine > count($lines)) {
+            return null;
+        }
+
+        $chunkLines = array_slice($lines, $startLine - 1, $endLine - $startLine + 1);
 
         return implode("\n", $chunkLines);
     }
 
     /**
-     * Verify that the stored chunk_sha1 matches the current content
+     * Verify that the stored chunk_sha1 matches the current content.
      */
     public function verifySha1(Project $project): bool
     {
@@ -137,24 +148,46 @@ class ProjectFileChunk extends Model
     }
 
     /**
-     * Generate a stable chunk_id from path and line range
+     * Verify that the chunk_id is correctly computed.
      */
-    public static function generateChunkId(string $path, int $startLine, int $endLine): string
+    public function verifyChunkId(): bool
     {
-        $pathHash = substr(sha1($path), 0, 12);
-        return "{$pathHash}:{$startLine}-{$endLine}";
+        $expectedId = self::generateChunkId($this->path, $this->sha1, $this->start_line, $this->end_line);
+        return $this->chunk_id === $expectedId;
     }
 
+    // generateChunkId() is provided by HasDeterministicChunkId trait
+
     /**
-     * Parse a chunk_id into its components
+     * Parse a chunk_id to extract components (for legacy format).
+     *
+     * @deprecated Use generateChunkId() instead for new format.
      */
     public static function parseChunkId(string $chunkId): ?array
     {
+        // New format: 16-char hex string
+        if (preg_match('/^[a-f0-9]{16}$/', $chunkId)) {
+            return [
+                'format' => 'new',
+                'hash' => $chunkId,
+            ];
+        }
+
+        // Legacy format: path_hash:start-end
         if (preg_match('/^([a-f0-9]{12}):(\d+)-(\d+)$/', $chunkId, $matches)) {
             return [
+                'format' => 'legacy_v2',
                 'path_hash' => $matches[1],
                 'start_line' => (int)$matches[2],
                 'end_line' => (int)$matches[3],
+            ];
+        }
+
+        // Old format: chunk_XXXX
+        if (preg_match('/^chunk_(\d{4})$/', $chunkId, $matches)) {
+            return [
+                'format' => 'legacy_v1',
+                'index' => (int)$matches[1],
             ];
         }
 
@@ -162,11 +195,41 @@ class ProjectFileChunk extends Model
     }
 
     /**
-     * Check if this is an old-format chunk_id
+     * Check if this is an old-format chunk_id.
      */
     public static function isOldFormat(string $chunkId): bool
     {
         return (bool)preg_match('/^chunk_\d{4}$/', $chunkId);
     }
-}
 
+    /**
+     * Check if this is a legacy v2 format chunk_id (path_hash:lines).
+     */
+    public static function isLegacyV2Format(string $chunkId): bool
+    {
+        return (bool)preg_match('/^[a-f0-9]{12}:\d+-\d+$/', $chunkId);
+    }
+
+    /**
+     * Check if this is the new deterministic format.
+     * Uses isValidChunkIdFormat() from HasDeterministicChunkId trait.
+     */
+    public static function isNewFormat(string $chunkId): bool
+    {
+        return self::isValidChunkIdFormat($chunkId);
+    }
+
+    // Model methods can now use the trait:
+    public function regenerateChunkId(): string
+    {
+        $newId = self::generateChunkId($this->path, $this->sha1, $this->start_line, $this->end_line);
+        $this->old_chunk_id = $this->chunk_id;
+        $this->chunk_id = $newId;
+        return $newId;
+    }
+
+    public function isChunkIdValid(): bool
+    {
+        return self::verifyChunkId();
+    }
+}

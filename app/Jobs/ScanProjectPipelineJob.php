@@ -6,10 +6,10 @@ use App\Models\Project;
 use App\Models\ProjectScan;
 use App\Services\Projects\ChunkBuilder;
 use App\Services\Projects\GitService;
+use App\Services\Projects\KnowledgeBaseBuilder;
 use App\Services\Projects\ProgressReporter;
 use App\Services\Projects\RoutesExtractor;
 use App\Services\Projects\ScannerService;
-use App\Services\Projects\ScanOutputBuilder;
 use App\Services\Projects\StackDetector;
 use Exception;
 use Illuminate\Bus\Queueable;
@@ -31,9 +31,7 @@ class ScanProjectPipelineJob implements ShouldQueue
         public int    $projectId,
         public string $trigger = 'manual',
         public bool   $forceFull = false,
-    )
-    {
-    }
+    ) {}
 
     public function handle(
         GitService       $git,
@@ -42,8 +40,7 @@ class ScanProjectPipelineJob implements ShouldQueue
         ChunkBuilder     $chunkBuilder,
         ProgressReporter $progress,
         RoutesExtractor  $routesExtractor,
-    ): void
-    {
+    ): void {
         $project = Project::find($this->projectId);
 
         if (!$project) {
@@ -57,7 +54,7 @@ class ScanProjectPipelineJob implements ShouldQueue
             'status' => 'running',
             'trigger' => $this->trigger,
             'started_at' => now(),
-            'scanner_version' => '2.0.0',
+            'scanner_version' => '2.1.0',
         ]);
 
         // Start scanning
@@ -79,10 +76,12 @@ class ScanProjectPipelineJob implements ShouldQueue
 
             Log::info('ScanProjectPipelineJob: Completed successfully', [
                 'project_id' => $project->id,
+                'scan_id' => $result['kb_scan_id'] ?? null,
                 'commit_sha' => $result['commit_sha'],
                 'total_files' => $result['total_files'],
                 'total_chunks' => $result['total_chunks'],
                 'excluded_files' => $result['excluded_files'],
+                'kb_validation' => $result['kb_validation'] ?? null,
             ]);
         } catch (Exception $e) {
             Log::error('ScanProjectPipelineJob: Failed', [
@@ -106,8 +105,7 @@ class ScanProjectPipelineJob implements ShouldQueue
         ChunkBuilder     $chunkBuilder,
         ProgressReporter $progress,
         RoutesExtractor  $routesExtractor,
-    ): array
-    {
+    ): array {
         $startTime = microtime(true);
 
         // Stage 1: Workspace
@@ -119,7 +117,10 @@ class ScanProjectPipelineJob implements ShouldQueue
         $progress->startStage($project, $scan, 'clone');
         $token = $this->getGitHubToken($project);
         $commitSha = $git->cloneOrUpdate($project, $token);
-        $scan->update(['commit_sha' => $commitSha]);
+        $scan->update([
+            'commit_sha' => $commitSha,
+            'previous_commit_sha' => $project->last_commit_sha,
+        ]);
         $progress->completeStage($project, $scan, 'clone');
 
         // Stage 3: Build File Manifest
@@ -129,7 +130,7 @@ class ScanProjectPipelineJob implements ShouldQueue
             $progress->updateStage($project, $scan, 'manifest', $percent);
         });
 
-        // Persist manifest with new fields
+        // Persist manifest to database
         $scanner->persistManifest($project, $result['files']);
 
         // Update project stats
@@ -164,34 +165,37 @@ class ScanProjectPipelineJob implements ShouldQueue
         });
         $progress->completeStage($project, $scan, 'chunks');
 
-        // Stage 6: Finalize
+        // Stage 6: Build Knowledge Base Output
         $progress->startStage($project, $scan, 'finalize');
 
         // Extract routes from all route files recursively
         $routes = $routesExtractor->save($project);
 
-        // Generate comprehensive scan output
-        $outputBuilder = new ScanOutputBuilder($project);
-        $scanOutput = $outputBuilder->build();
-        $outputPath = $project->knowledge_path . '/scan_output.json';
-        file_put_contents($outputPath, json_encode($scanOutput, JSON_PRETTY_PRINT));
+        // Build standardized knowledge base output
+        $kbBuilder = new KnowledgeBaseBuilder($project, $scan);
+        $kbValidation = $kbBuilder->build();
+
+        // Update project with KB scan ID
+        $project->update([
+            'scan_output_version' => '2.1.0',
+            'last_commit_sha' => $commitSha,
+            'last_kb_scan_id' => $kbBuilder->getScanId(),
+            'scanned_at' => now(),
+        ]);
 
         // Update scan record with stats
+        $durationMs = (int)((microtime(true) - $startTime) * 1000);
         $scan->update([
             'files_scanned' => $result['stats']['total_files'],
             'files_excluded' => $result['stats']['excluded_count'] ?? 0,
             'chunks_created' => $chunkResult['total_chunks'] ?? 0,
             'total_lines' => $result['stats']['total_lines'],
             'total_bytes' => $result['stats']['total_bytes'],
-            'duration_ms' => (int)((microtime(true) - $startTime) * 1000),
+            'duration_ms' => $durationMs,
         ]);
 
-        // Update project metadata
-        $project->update([
-            'scan_output_version' => '2.0.0',
-            'last_commit_sha' => $commitSha,
-            'scanned_at' => now(),
-        ]);
+        // Cleanup old KB scans (keep last 3)
+        $project->cleanupOldKbScans(3);
 
         $progress->completeStage($project, $scan, 'finalize');
 
@@ -201,7 +205,10 @@ class ScanProjectPipelineJob implements ShouldQueue
             'total_chunks' => $chunkResult['total_chunks'] ?? 0,
             'excluded_files' => $result['stats']['excluded_count'] ?? 0,
             'routes_files' => count($routes),
-            'duration_ms' => (int)((microtime(true) - $startTime) * 1000),
+            'duration_ms' => $durationMs,
+            'kb_scan_id' => $kbBuilder->getScanId(),
+            'kb_output_path' => $kbBuilder->getOutputPath(),
+            'kb_validation' => $kbValidation,
         ];
     }
 
@@ -239,7 +246,7 @@ class ScanProjectPipelineJob implements ShouldQueue
             $project->markFailed('Job failed after retries: ' . $exception->getMessage());
         }
 
-        Log::error('ScanProjectPipelineJob: Permanently failed', [
+        Log::error('ScanProjectPipelineJob: Job failed permanently', [
             'project_id' => $this->projectId,
             'error' => $exception->getMessage(),
         ]);

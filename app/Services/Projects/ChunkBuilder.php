@@ -1,16 +1,18 @@
 <?php
 
 namespace App\Services\Projects;
-namespace App\Services\Projects;
 
 use App\Models\Project;
 use App\Models\ProjectFile;
 use App\Models\ProjectFileChunk;
+use App\Services\Projects\Concerns\HasDeterministicChunkId;
 
 class ChunkBuilder
 {
+    use HasDeterministicChunkId;
     private int $maxChunkBytes;
     private int $maxChunkLines;
+    private int $minChunkLines;
     private ExclusionMatcher $exclusionMatcher;
     private LanguageDetector $languageDetector;
     private SymbolExtractor $symbolExtractor;
@@ -28,9 +30,10 @@ class ChunkBuilder
 
     public function __construct()
     {
-        $config = config('projects.chunking');
+        $config = config('projects.chunking', []);
         $this->maxChunkBytes = $config['max_bytes'] ?? 200 * 1024;
-        $this->maxChunkLines = $config['max_lines'] ?? 500;
+        $this->maxChunkLines = $config['max_lines'] ?? 400; // Default 400 per requirements
+        $this->minChunkLines = $config['min_lines'] ?? 250; // Target 250-400 range
         $this->languageDetector = new LanguageDetector();
         $this->symbolExtractor = new SymbolExtractor();
     }
@@ -47,7 +50,7 @@ class ChunkBuilder
             ->where('is_binary', false)
             ->where('is_excluded', false)
             ->where('size_bytes', '>', 0)
-            ->where('size_bytes', '<=', config('projects.max_file_size'))
+            ->where('size_bytes', '<=', config('projects.max_file_size', 1024 * 1024))
             ->orderByRaw($this->getDirectoryPriorityOrder())
             ->get();
 
@@ -70,6 +73,12 @@ class ChunkBuilder
                 continue;
             }
 
+            // Ensure file SHA1 is current
+            $currentSha1 = sha1($content);
+            if ($file->sha1 !== $currentSha1) {
+                $file->update(['sha1' => $currentSha1]);
+            }
+
             $chunks = $this->chunkFile($project, $file, $content);
 
             foreach ($chunks as $chunk) {
@@ -84,10 +93,10 @@ class ChunkBuilder
             }
         }
 
-        // Save all chunks
+        // Save all chunks to database
         $this->saveChunks($project, $allChunks);
 
-        // Save path index
+        // Save path index (legacy format for backwards compat)
         $this->savePathIndex($project, $fileToChunks);
 
         // Save manifest and directories
@@ -106,21 +115,22 @@ class ChunkBuilder
         $lines = explode("\n", $content);
         $totalLines = count($lines);
         $fileSize = strlen($content);
-
-        // Compute path hash for chunk_id generation
-        $pathHash = substr(sha1($file->path), 0, 12);
+        $fileSha1 = $file->sha1 ?? sha1($content);
 
         $chunks = [];
 
-        // Single chunk for small files
+        // Single chunk for small files (within max limits)
         if ($totalLines <= $this->maxChunkLines && $fileSize <= $this->maxChunkBytes) {
             $chunkContent = $content;
             $chunkSha1 = sha1($chunkContent);
 
+            // Use deterministic chunk ID (matches KnowledgeBaseBuilder)
+            $chunkId = $this->generateChunkId($file->path, $fileSha1, 1, $totalLines);
+
             $chunks[] = [
-                'chunk_id' => "{$pathHash}:1-{$totalLines}",
+                'chunk_id' => $chunkId,
                 'file_path' => $file->path,
-                'file_sha1' => $file->sha1,
+                'file_sha1' => $fileSha1,
                 'start_line' => 1,
                 'end_line' => $totalLines,
                 'chunk_index' => 0,
@@ -146,10 +156,13 @@ class ChunkBuilder
             $chunkContent = implode("\n", $chunkLines);
             $chunkSha1 = sha1($chunkContent);
 
+            // Use deterministic chunk ID
+            $chunkId = $this->generateChunkId($file->path, $fileSha1, $segment['start'], $segment['end']);
+
             $chunks[] = [
-                'chunk_id' => "{$pathHash}:{$segment['start']}-{$segment['end']}",
+                'chunk_id' => $chunkId,
                 'file_path' => $file->path,
-                'file_sha1' => $file->sha1,
+                'file_sha1' => $fileSha1,
                 'start_line' => $segment['start'],
                 'end_line' => $segment['end'],
                 'chunk_index' => $index,
@@ -168,6 +181,8 @@ class ChunkBuilder
         return $chunks;
     }
 
+    // generateChunkId() is provided by HasDeterministicChunkId trait
+
     private function splitLargeFile(array $lines, string $path): array
     {
         $segments = [];
@@ -175,28 +190,31 @@ class ChunkBuilder
         $currentStart = 1;
 
         while ($currentStart <= $totalLines) {
-            $candidateEnd = min($currentStart + $this->maxChunkLines - 1, $totalLines);
+            // Target chunk size between min and max
+            $targetEnd = min($currentStart + $this->maxChunkLines - 1, $totalLines);
 
-            // Try to break at a logical point
-            if ($candidateEnd < $totalLines) {
-                $breakPoint = $this->findBreakPoint($lines, $currentStart - 1, $candidateEnd - 1);
-                if ($breakPoint !== null) {
-                    $candidateEnd = $breakPoint + 1;
+            // Try to find a good break point if we're not at the end
+            if ($targetEnd < $totalLines) {
+                $minEnd = $currentStart + $this->minChunkLines - 1;
+                $breakPoint = $this->findBreakPoint($lines, $minEnd - 1, $targetEnd - 1);
+
+                if ($breakPoint !== null && $breakPoint >= $minEnd - 1) {
+                    $targetEnd = $breakPoint + 1;
                 }
             }
 
             $segments[] = [
                 'start' => $currentStart,
-                'end' => $candidateEnd,
+                'end' => $targetEnd,
             ];
 
-            $currentStart = $candidateEnd + 1;
+            $currentStart = $targetEnd + 1;
         }
 
         return $segments;
     }
 
-    private function findBreakPoint(array $lines, int $start, int $end): ?int
+    private function findBreakPoint(array $lines, int $searchStart, int $searchEnd): ?int
     {
         $weights = config('projects.chunking.break_weights', [
             'empty_line' => 10,
@@ -208,10 +226,8 @@ class ChunkBuilder
         $bestPoint = null;
         $bestWeight = 0;
 
-        // Search from end backwards to middle
-        $midPoint = $start + (int)(($end - $start) / 2);
-
-        for ($i = $end; $i > $midPoint; $i--) {
+        // Search from end backwards to searchStart
+        for ($i = $searchEnd; $i >= $searchStart; $i--) {
             $line = trim($lines[$i] ?? '');
             $weight = 0;
 
@@ -271,19 +287,33 @@ class ChunkBuilder
             ProjectFileChunk::insert($batch);
         }
 
-        // Save chunk files grouped by path hash
-        $chunksByPathHash = [];
+        // Save chunk files grouped by path (first 8 chars of path hash)
+        $this->saveChunkFiles($project, $chunks);
+    }
+
+    private function saveChunkFiles(Project $project, array $chunks): void
+    {
+        $chunksByGroup = [];
+
         foreach ($chunks as $chunk) {
-            $pathHash = explode(':', $chunk['chunk_id'])[0];
-            $chunksByPathHash[$pathHash][] = $chunk;
+            // Group by first 8 chars of SHA1(path) for filesystem organization
+            $pathHash = substr(sha1($chunk['file_path']), 0, 8);
+            $chunksByGroup[$pathHash][] = $chunk;
         }
 
-        foreach ($chunksByPathHash as $pathHash => $pathChunks) {
+        foreach ($chunksByGroup as $pathHash => $pathChunks) {
             $chunkFile = $project->chunks_path . '/' . $pathHash . '.json';
             file_put_contents($chunkFile, json_encode([
                 'path_hash' => $pathHash,
                 'file_path' => $pathChunks[0]['file_path'],
-                'chunks' => $pathChunks,
+                'file_sha1' => $pathChunks[0]['file_sha1'],
+                'chunk_count' => count($pathChunks),
+                'chunks' => array_map(function ($c) {
+                    // Don't include full content in the grouped file
+                    $stripped = $c;
+                    unset($stripped['content']);
+                    return $stripped;
+                }, $pathChunks),
             ], JSON_PRETTY_PRINT));
         }
     }
@@ -297,9 +327,10 @@ class ChunkBuilder
     private function saveManifest(Project $project): void
     {
         $files = $project->files()->get();
+        $chunks = $project->chunks()->get()->groupBy('path');
 
         $manifest = [
-            'version' => '2.0.0',
+            'version' => '2.1.0',
             'project_id' => $project->id,
             'repo_full_name' => $project->repo_full_name,
             'default_branch' => $project->default_branch,
@@ -311,18 +342,23 @@ class ChunkBuilder
                 'total_lines' => $project->total_lines,
                 'total_bytes' => $project->total_size_bytes,
             ],
-            'files' => $files->map(fn($f) => [
-                'file_id' => 'f_' . substr(sha1($f->path), 0, 12),
-                'path' => $f->path,
-                'extension' => $f->extension,
-                'language' => $f->language,
-                'size_bytes' => $f->size_bytes,
-                'line_count' => $f->line_count,
-                'is_binary' => $f->is_binary,
-                'is_excluded' => $f->is_excluded,
-                'sha1' => $f->sha1,
-                'framework_hints' => $f->framework_hints ?? [],
-            ])->toArray(),
+            'files' => $files->map(function ($f) use ($chunks) {
+                $fileChunks = $chunks->get($f->path, collect());
+                return [
+                    'file_id' => 'f_' . substr(sha1($f->path), 0, 12),
+                    'path' => $f->path,
+                    'extension' => $f->extension,
+                    'language' => $f->language,
+                    'size_bytes' => $f->size_bytes,
+                    'line_count' => $f->line_count,
+                    'is_binary' => $f->is_binary,
+                    'is_excluded' => $f->is_excluded,
+                    'sha1' => $f->sha1,
+                    'framework_hints' => $f->framework_hints ?? [],
+                    'chunk_count' => $fileChunks->count(),
+                    'chunk_ids' => $fileChunks->pluck('chunk_id')->toArray(),
+                ];
+            })->toArray(),
         ];
 
         $manifestPath = $project->knowledge_path . '/manifest.json';
@@ -396,7 +432,8 @@ class ChunkBuilder
             }
 
             // Update file SHA1
-            $file->update(['sha1' => sha1($content)]);
+            $newSha1 = sha1($content);
+            $file->update(['sha1' => $newSha1]);
 
             $chunks = $this->chunkFile($project, $file, $content);
 

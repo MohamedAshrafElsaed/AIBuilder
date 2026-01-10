@@ -34,6 +34,7 @@ class Project extends Model
         'total_files',
         'total_lines',
         'total_size_bytes',
+        'last_kb_scan_id',
     ];
 
     protected function casts(): array
@@ -75,7 +76,7 @@ class Project extends Model
     }
 
     // -------------------------------------------------------------------------
-    // Path Accessors
+    // Path Accessors - Legacy Storage
     // -------------------------------------------------------------------------
 
     public function getStoragePathAttribute(): string
@@ -101,6 +102,106 @@ class Project extends Model
     public function getIndexesPathAttribute(): string
     {
         return $this->knowledge_path . '/indexes';
+    }
+
+    // -------------------------------------------------------------------------
+    // Path Accessors - New Knowledge Base Output
+    // -------------------------------------------------------------------------
+
+    /**
+     * Get the base path for all knowledge base outputs.
+     */
+    public function getKbBasePathAttribute(): string
+    {
+        return storage_path('app/project_kb/' . $this->id);
+    }
+
+    /**
+     * Get the path for a specific scan's knowledge base output.
+     */
+    public function getKbScanPath(string $scanId): string
+    {
+        return $this->kb_base_path . '/' . $scanId;
+    }
+
+    /**
+     * Get the path for the latest scan's knowledge base output.
+     */
+    public function getLatestKbPathAttribute(): ?string
+    {
+        if (!$this->last_kb_scan_id) {
+            return null;
+        }
+        return $this->getKbScanPath($this->last_kb_scan_id);
+    }
+
+    /**
+     * Get the scan_meta.json path for a scan.
+     */
+    public function getKbScanMetaPath(string $scanId): string
+    {
+        return $this->getKbScanPath($scanId) . '/scan_meta.json';
+    }
+
+    /**
+     * Get the files_index path for a scan (json or ndjson).
+     */
+    public function getKbFilesIndexPath(string $scanId): string
+    {
+        $basePath = $this->getKbScanPath($scanId);
+        if (file_exists($basePath . '/files_index.ndjson')) {
+            return $basePath . '/files_index.ndjson';
+        }
+        return $basePath . '/files_index.json';
+    }
+
+    /**
+     * Get the chunks.ndjson path for a scan.
+     */
+    public function getKbChunksPath(string $scanId): string
+    {
+        return $this->getKbScanPath($scanId) . '/chunks.ndjson';
+    }
+
+    /**
+     * Get the directory_stats.json path for a scan.
+     */
+    public function getKbDirectoryStatsPath(string $scanId): string
+    {
+        return $this->getKbScanPath($scanId) . '/directory_stats.json';
+    }
+
+    /**
+     * List all available scan IDs for this project.
+     */
+    public function listKbScans(): array
+    {
+        $basePath = $this->kb_base_path;
+        if (!is_dir($basePath)) {
+            return [];
+        }
+
+        $scans = [];
+        foreach (scandir($basePath) as $entry) {
+            if ($entry === '.' || $entry === '..') continue;
+            if (is_dir($basePath . '/' . $entry) && str_starts_with($entry, 'scan_')) {
+                $metaPath = $basePath . '/' . $entry . '/scan_meta.json';
+                if (file_exists($metaPath)) {
+                    $meta = json_decode(file_get_contents($metaPath), true);
+                    $scans[] = [
+                        'scan_id' => $entry,
+                        'scanned_at' => $meta['scanned_at_iso'] ?? null,
+                        'head_commit_sha' => $meta['head_commit_sha'] ?? null,
+                        'total_chunks' => $meta['stats']['total_chunks'] ?? 0,
+                    ];
+                }
+            }
+        }
+
+        // Sort by scanned_at descending
+        usort($scans, fn($a, $b) => ($b['scanned_at'] ?? '') <=> ($a['scanned_at'] ?? ''));
+
+        return $scans;
     }
 
     // -------------------------------------------------------------------------
@@ -148,12 +249,17 @@ class Project extends Model
 
     public function needsMigration(): bool
     {
-        return $this->scan_output_version === null || version_compare($this->scan_output_version, '2.0.0', '<');
+        return $this->scan_output_version === null || version_compare($this->scan_output_version, '2.1.0', '<');
     }
 
     public function hasLocalRepo(): bool
     {
         return is_dir($this->repo_path . '/.git');
+    }
+
+    public function hasKnowledgeBase(): bool
+    {
+        return $this->last_kb_scan_id !== null && is_dir($this->getKbScanPath($this->last_kb_scan_id));
     }
 
     // -------------------------------------------------------------------------
@@ -224,6 +330,11 @@ class Project extends Model
         ]);
     }
 
+    public function setLastKbScanId(string $scanId): void
+    {
+        $this->update(['last_kb_scan_id' => $scanId]);
+    }
+
     // -------------------------------------------------------------------------
     // GitHub URLs
     // -------------------------------------------------------------------------
@@ -273,15 +384,50 @@ class Project extends Model
         return $this->chunks()->where('path', $path)->orderBy('start_line');
     }
 
+    /**
+     * Find a chunk by its deterministic ID.
+     */
+    public function findChunkById(string $chunkId): ?ProjectFileChunk
+    {
+        return $this->chunks()->where('chunk_id', $chunkId)->first();
+    }
+
     // -------------------------------------------------------------------------
     // Cleanup
     // -------------------------------------------------------------------------
 
     public function cleanupStorage(): void
     {
+        // Clean legacy storage
         $path = $this->storage_path;
         if (is_dir($path)) {
             $this->recursiveDelete($path);
+        }
+
+        // Clean KB outputs
+        $kbPath = $this->kb_base_path;
+        if (is_dir($kbPath)) {
+            $this->recursiveDelete($kbPath);
+        }
+    }
+
+    /**
+     * Clean up old KB scans, keeping only the latest N.
+     */
+    public function cleanupOldKbScans(int $keep = 3): void
+    {
+        $scans = $this->listKbScans();
+
+        if (count($scans) <= $keep) {
+            return;
+        }
+
+        $toDelete = array_slice($scans, $keep);
+        foreach ($toDelete as $scan) {
+            $scanPath = $this->getKbScanPath($scan['scan_id']);
+            if (is_dir($scanPath)) {
+                $this->recursiveDelete($scanPath);
+            }
         }
     }
 

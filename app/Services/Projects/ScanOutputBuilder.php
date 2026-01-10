@@ -3,9 +3,21 @@
 namespace App\Services\Projects;
 
 use App\Models\Project;
+use App\Services\Projects\Concerns\HasDeterministicChunkId;
 
+/**
+ * @deprecated Use KnowledgeBaseBuilder instead for standardized output.
+ *
+ * This class is kept for backwards compatibility with existing scan_output.json files.
+ * New scans should use KnowledgeBaseBuilder which produces:
+ * - scan_meta.json
+ * - files_index.json/.ndjson
+ * - chunks.ndjson
+ * - directory_stats.json
+ */
 class ScanOutputBuilder
 {
+    use HasDeterministicChunkId;
     private Project $project;
     private ExclusionMatcher $exclusionMatcher;
     private int $startTime;
@@ -17,12 +29,17 @@ class ScanOutputBuilder
         $this->startTime = (int) (microtime(true) * 1000);
     }
 
+    /**
+     * Build legacy scan output format.
+     *
+     * @deprecated Use KnowledgeBaseBuilder::build() instead.
+     */
     public function build(): array
     {
         $files = $this->project->files()->get();
         $chunks = $this->project->chunks()->orderBy('path')->orderBy('start_line')->get();
 
-        // Build file_to_chunks mapping
+        // Build file_to_chunks mapping using CURRENT chunk IDs (not legacy)
         $fileToChunks = [];
         foreach ($chunks as $chunk) {
             if (!isset($fileToChunks[$chunk->path])) {
@@ -59,10 +76,11 @@ class ScanOutputBuilder
             'head_commit_sha' => $this->project->last_commit_sha,
             'parent_commit_sha' => $this->project->parent_commit_sha ?? null,
             'scanned_at_iso' => now()->toIso8601String(),
-            'scanner_version' => '2.0.0',
+            'scanner_version' => '2.1.0',
             'exclusion_rules_version' => $this->exclusionMatcher->getRulesVersion(),
             'is_incremental' => false,
             'previous_scan_id' => null,
+            '_deprecated' => 'Use KnowledgeBaseBuilder for new implementations',
         ];
     }
 
@@ -144,7 +162,6 @@ class ScanOutputBuilder
                 'is_binary' => (bool) $file->is_binary,
                 'is_excluded' => (bool) $file->is_excluded,
                 'exclusion_reason' => $file->exclusion_reason,
-                // These are already arrays due to model casts - no json_decode needed
                 'framework_hints' => $file->framework_hints ?? [],
                 'symbols_declared' => $file->symbols_declared ?? [],
                 'imports' => $file->imports ?? [],
@@ -169,7 +186,6 @@ class ScanOutputBuilder
                 'chunk_lines' => $chunk->end_line - $chunk->start_line + 1,
                 'chunk_sha1' => $chunk->chunk_sha1,
                 'content' => $this->getChunkContent($chunk),
-                // These are already arrays due to model casts - no json_decode needed
                 'symbols_declared' => $chunk->symbols_declared ?? [],
                 'symbols_used' => $chunk->symbols_used ?? [],
                 'imports' => $chunk->imports ?? [],

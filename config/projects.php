@@ -1,37 +1,126 @@
 <?php
 
 return [
-
+    /*
+    |--------------------------------------------------------------------------
+    | Project Storage Path
+    |--------------------------------------------------------------------------
+    |
+    | The base path where project repositories and knowledge data are stored.
+    |
+    */
     'storage_path' => storage_path('app/projects'),
 
     /*
     |--------------------------------------------------------------------------
-    | Exclusion Configuration
+    | Maximum File Size
     |--------------------------------------------------------------------------
+    |
+    | Maximum file size in bytes to process. Files larger than this are skipped.
+    |
     */
+    'max_file_size' => env('PROJECT_MAX_FILE_SIZE', 1024 * 1024), // 1MB
 
+    /*
+    |--------------------------------------------------------------------------
+    | Chunking Configuration
+    |--------------------------------------------------------------------------
+    |
+    | Settings for splitting large files into chunks for retrieval.
+    |
+    | Chunk Size Strategy:
+    | - Target range: 250-400 lines per chunk (configurable)
+    | - Files under max_lines are kept as single chunks
+    | - Larger files are split at logical boundaries (functions, classes)
+    |
+    */
+    'chunking' => [
+        // Maximum bytes per chunk (soft limit, respected when possible)
+        'max_bytes' => env('CHUNK_MAX_BYTES', 200 * 1024), // 200KB
+
+        // Maximum lines per chunk - upper bound
+        'max_lines' => env('CHUNK_MAX_LINES', 400),
+
+        // Minimum lines per chunk - lower bound (prevents tiny chunks)
+        'min_lines' => env('CHUNK_MIN_LINES', 250),
+
+        // Weights for determining break points when splitting
+        'break_weights' => [
+            'empty_line' => 10,        // Prefer breaking at empty lines
+            'function_boundary' => 8,  // Function/method declarations
+            'class_boundary' => 9,     // Class/trait/interface declarations
+            'block_end' => 7,          // Closing braces
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Pipeline Stages
+    |--------------------------------------------------------------------------
+    |
+    | Configuration for the scanning pipeline stages.
+    | Weight determines the relative portion of total progress.
+    |
+    */
+    'pipeline_stages' => [
+        'workspace' => [
+            'name' => 'Preparing workspace',
+            'weight' => 5,
+        ],
+        'clone' => [
+            'name' => 'Cloning repository',
+            'weight' => 20,
+        ],
+        'manifest' => [
+            'name' => 'Building file manifest',
+            'weight' => 25,
+        ],
+        'stack' => [
+            'name' => 'Detecting stack',
+            'weight' => 5,
+        ],
+        'chunks' => [
+            'name' => 'Creating knowledge chunks',
+            'weight' => 35,
+        ],
+        'finalize' => [
+            'name' => 'Finalizing',
+            'weight' => 10,
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Exclusion Rules
+    |--------------------------------------------------------------------------
+    |
+    | Default rules for excluding files and directories from scanning.
+    |
+    */
     'exclusions' => [
+        // Toggle switches for common inclusions
+        'toggles' => [
+            'include_vendor' => env('SCAN_INCLUDE_VENDOR', false),
+            'include_node_modules' => env('SCAN_INCLUDE_NODE_MODULES', false),
+            'include_storage' => env('SCAN_INCLUDE_STORAGE', false),
+            'include_lock_files' => env('SCAN_INCLUDE_LOCK_FILES', false),
+            'include_source_maps' => env('SCAN_INCLUDE_SOURCE_MAPS', false),
+            'include_minified' => env('SCAN_INCLUDE_MINIFIED', false),
+        ],
 
-        // Schema version for tracking changes
-        'schema_version' => '2.0.0',
+        // Allow project-level overrides via project_scan_config.json
+        'allow_project_overrides' => true,
 
-        // Directory exclusions (exact match against any path segment)
+        // Directories to exclude (exact match against path segments)
         'directories' => [
-            // Version control
             '.git',
             '.svn',
             '.hg',
-
-            // Dependencies
             'vendor',
             'node_modules',
             'bower_components',
-
-            // Laravel specific
             'storage',
             'bootstrap/cache',
-
-            // Build outputs
             'public/build',
             'public/hot',
             'dist',
@@ -39,26 +128,20 @@ return [
             '.output',
             '.next',
             '.nuxt',
-
-            // IDE/Editor
             '.idea',
             '.vscode',
             '.fleet',
-
-            // Cache directories
             'cache',
             '.cache',
             '__pycache__',
             '.pytest_cache',
             '.mypy_cache',
             '.phpunit.cache',
-
-            // Coverage/Reports
             'coverage',
             '.nyc_output',
         ],
 
-        // Path pattern exclusions (glob-style)
+        // Glob patterns to exclude
         'patterns' => [
             '**/node_modules/**',
             '**/vendor/**',
@@ -68,7 +151,7 @@ return [
             '**/bootstrap/cache/**',
         ],
 
-        // File name exclusions (exact match)
+        // Specific files to exclude
         'files' => [
             '.DS_Store',
             'Thumbs.db',
@@ -77,96 +160,78 @@ return [
             '.editorconfig',
         ],
 
-        // Extension exclusions
+        // Extensions to exclude
         'extensions' => [
-            // Lock files
             'lock',
-
-            // Logs
             'log',
-
-            // Source maps
             'map',
-
-            // Minified files (pattern-based)
             'min.js',
             'min.css',
-
-            // Compiled assets
             'bundle.js',
             'chunk.js',
         ],
 
-        // Binary extensions (content not scanned)
+        // Binary file extensions (not scanned for content)
         'binary_extensions' => [
             // Images
             'png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'webp', 'svg', 'avif', 'tiff',
-
             // Audio/Video
             'mp3', 'mp4', 'wav', 'avi', 'mov', 'mkv', 'webm', 'ogg', 'flac',
-
             // Documents
             'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
-
             // Archives
             'zip', 'tar', 'gz', 'rar', '7z', 'bz2', 'xz',
-
             // Executables
             'exe', 'dll', 'so', 'dylib', 'bin', 'app',
-
             // Fonts
             'ttf', 'otf', 'woff', 'woff2', 'eot',
-
             // Databases
-            'sqlite', 'db', 'mysql', 'sqlite3', 'mdb',
-
+            'sqlite', 'db', 'sqlite3', 'mdb',
             // Other
             'phar', 'jar', 'war',
         ],
-
-        // Configurable toggles
-        'toggles' => [
-            'include_vendor' => false,
-            'include_node_modules' => false,
-            'include_storage' => false,
-            'include_build_output' => false,
-            'include_lock_files' => false,
-            'include_source_maps' => false,
-            'include_minified' => false,
-        ],
-
-        // Per-project override capability
-        'allow_project_overrides' => true,
     ],
 
     /*
     |--------------------------------------------------------------------------
-    | File Size Limits
+    | Framework Hints
     |--------------------------------------------------------------------------
+    |
+    | Patterns for detecting framework-specific files.
+    |
     */
-
-    'max_file_size' => env('PROJECT_MAX_FILE_SIZE', 1024 * 1024), // 1MB
-    'warn_file_size' => env('PROJECT_WARN_FILE_SIZE', 512 * 1024), // 512KB
-
-    /*
-    |--------------------------------------------------------------------------
-    | Chunking Configuration
-    |--------------------------------------------------------------------------
-    */
-
-    'chunking' => [
-        'max_bytes' => env('PROJECT_CHUNK_MAX_BYTES', 200 * 1024), // 200KB
-        'max_lines' => env('PROJECT_CHUNK_MAX_LINES', 500),
-        'min_lines' => env('PROJECT_CHUNK_MIN_LINES', 10),
-        'overlap_lines' => env('PROJECT_CHUNK_OVERLAP', 0), // No overlap by default
-
-        // Break point preferences (higher = more preferred)
-        'break_weights' => [
-            'empty_line' => 10,
-            'function_boundary' => 8,
-            'class_boundary' => 9,
-            'block_end' => 7,
-            'comment_block' => 5,
+    'framework_hints' => [
+        'path_patterns' => [
+            'laravel' => [
+                'app/Http/Controllers/**',
+                'app/Models/**',
+                'routes/*.php',
+            ],
+            'eloquent' => [
+                'app/Models/**',
+            ],
+            'blade' => [
+                'resources/views/**/*.blade.php',
+            ],
+            'livewire' => [
+                'app/Livewire/**',
+                'app/Http/Livewire/**',
+                'resources/views/livewire/**',
+            ],
+            'inertia' => [
+                'resources/js/Pages/**',
+                'resources/js/pages/**',
+            ],
+        ],
+        'content_markers' => [
+            'eloquent' => [
+                'extends Model',
+                'use HasFactory',
+            ],
+            'livewire' => [
+                'extends Component',
+                'use Livewire',
+            ],
         ],
     ],
 
@@ -174,8 +239,10 @@ return [
     |--------------------------------------------------------------------------
     | Language Detection
     |--------------------------------------------------------------------------
+    |
+    | Mapping of file extensions to language identifiers.
+    |
     */
-
     'languages' => [
         'extension_map' => [
             'php' => 'php',
@@ -206,86 +273,25 @@ return [
             'html' => 'html',
             'twig' => 'twig',
             'env' => 'dotenv',
-            'env.example' => 'dotenv',
         ],
     ],
 
     /*
     |--------------------------------------------------------------------------
-    | Framework Detection
+    | Knowledge Base Output
     |--------------------------------------------------------------------------
+    |
+    | Configuration for the standardized KB output format.
+    |
     */
+    'knowledge_base' => [
+        // Number of old scans to keep per project
+        'keep_old_scans' => env('KB_KEEP_OLD_SCANS', 3),
 
-    'framework_hints' => [
-        'path_patterns' => [
-            'livewire' => [
-                'app/Livewire/*',
-                'app/Http/Livewire/*',
-                'resources/views/livewire/*',
-            ],
-            'inertia' => [
-                'resources/js/Pages/*',
-                'resources/js/pages/*',
-                'resources/ts/Pages/*',
-                'resources/ts/pages/*',
-            ],
-            'blade' => [
-                'resources/views/*.blade.php',
-                'resources/views/**/*.blade.php',
-            ],
-            'vue' => [
-                'resources/js/**/*.vue',
-                'resources/ts/**/*.vue',
-            ],
-            'react' => [
-                'resources/js/**/*.jsx',
-                'resources/js/**/*.tsx',
-                'resources/ts/**/*.tsx',
-            ],
-        ],
-        'content_markers' => [
-            'livewire' => [
-                'extends Livewire\\Component',
-                'use Livewire\\',
-                '@livewire(',
-                '<livewire:',
-            ],
-            'inertia' => [
-                'Inertia::render',
-                '@inertia',
-                'createInertiaApp',
-                'usePage(',
-            ],
-            'vue' => [
-                'defineComponent',
-                '',
-                'createApp(',
-                'Vue.component',
-            ],
-            'react' => [
-                'React.',
-                'useState',
-                'useEffect',
-                'createRoot',
-                '',
-            ],
-        ],
+        // Use NDJSON for files_index when file count exceeds this
+        'ndjson_threshold' => 10000,
+
+        // Scanner version identifier
+        'version' => '2.1.0',
     ],
-
-    /*
-    |--------------------------------------------------------------------------
-    | Pipeline Configuration
-    |--------------------------------------------------------------------------
-    */
-
-    'pipeline_stages' => [
-        'workspace' => ['name' => 'Preparing workspace', 'weight' => 5],
-        'clone' => ['name' => 'Cloning repository', 'weight' => 15],
-        'manifest' => ['name' => 'Building file manifest', 'weight' => 30],
-        'stack' => ['name' => 'Detecting stack', 'weight' => 10],
-        'chunks' => ['name' => 'Building knowledge chunks', 'weight' => 35],
-        'finalize' => ['name' => 'Finalizing scan', 'weight' => 5],
-    ],
-
-    'github_webhook_secret' => env('GITHUB_WEBHOOK_SECRET'),
 ];

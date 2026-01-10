@@ -6,6 +6,7 @@ use App\Models\Project;
 use App\Models\ProjectScan;
 use App\Services\Projects\ChunkBuilder;
 use App\Services\Projects\GitService;
+use App\Services\Projects\KnowledgeBaseBuilder;
 use App\Services\Projects\ProgressReporter;
 use App\Services\Projects\ScannerService;
 use App\Services\Projects\StackDetector;
@@ -28,7 +29,7 @@ class UpdateProjectFromWebhookJob implements ShouldQueue, ShouldBeUnique
     public int $uniqueFor = 60;
 
     public function __construct(
-        public int $projectId,
+        public int   $projectId,
         public array $payload,
     ) {}
 
@@ -38,10 +39,10 @@ class UpdateProjectFromWebhookJob implements ShouldQueue, ShouldBeUnique
     }
 
     public function handle(
-        GitService $git,
-        ScannerService $scanner,
-        StackDetector $stackDetector,
-        ChunkBuilder $chunkBuilder,
+        GitService       $git,
+        ScannerService   $scanner,
+        StackDetector    $stackDetector,
+        ChunkBuilder     $chunkBuilder,
         ProgressReporter $progress,
     ): void {
         $project = Project::find($this->projectId);
@@ -63,15 +64,20 @@ class UpdateProjectFromWebhookJob implements ShouldQueue, ShouldBeUnique
             'status' => 'running',
             'trigger' => 'webhook',
             'started_at' => now(),
+            'scanner_version' => '2.1.0',
             'meta' => ['payload' => $this->payload],
         ]);
 
         $project->markScanning('clone', 0);
 
         try {
-            $this->runIncrementalUpdate($project, $scan, $git, $scanner, $stackDetector, $chunkBuilder, $progress);
+            $result = $this->runIncrementalUpdate($project, $scan, $git, $scanner, $stackDetector, $chunkBuilder, $progress);
 
-            Log::info('UpdateProjectFromWebhookJob: Completed', ['project_id' => $project->id]);
+            Log::info('UpdateProjectFromWebhookJob: Completed', [
+                'project_id' => $project->id,
+                'kb_scan_id' => $result['kb_scan_id'] ?? null,
+                'commit_sha' => $result['commit_sha'] ?? null,
+            ]);
         } catch (Exception $e) {
             Log::error('UpdateProjectFromWebhookJob: Failed', [
                 'project_id' => $project->id,
@@ -85,47 +91,58 @@ class UpdateProjectFromWebhookJob implements ShouldQueue, ShouldBeUnique
     }
 
     private function runIncrementalUpdate(
-        Project $project,
-        ProjectScan $scan,
-        GitService $git,
-        ScannerService $scanner,
-        StackDetector $stackDetector,
-        ChunkBuilder $chunkBuilder,
+        Project          $project,
+        ProjectScan      $scan,
+        GitService       $git,
+        ScannerService   $scanner,
+        StackDetector    $stackDetector,
+        ChunkBuilder     $chunkBuilder,
         ProgressReporter $progress,
-    ): void {
+    ): array {
+        $startTime = microtime(true);
         $previousSha = $project->last_commit_sha;
 
-        // Fetch and update repository
+        // Clone/update repo
         $progress->startStage($project, $scan, 'clone');
         $token = $this->getGitHubToken($project);
         $newSha = $git->cloneOrUpdate($project, $token);
-        $scan->update(['commit_sha' => $newSha]);
+
+        $scan->update([
+            'commit_sha' => $newSha,
+            'previous_commit_sha' => $previousSha,
+        ]);
         $progress->completeStage($project, $scan, 'clone');
 
-        // If no previous SHA, do a full scan instead
-        if (!$previousSha) {
-            $this->runFullScan($project, $scan, $scanner, $stackDetector, $chunkBuilder, $progress, $newSha);
-            return;
+        // Check if this is actually a new commit
+        if ($previousSha === $newSha) {
+            Log::info('UpdateProjectFromWebhookJob: No new commits', ['project_id' => $project->id]);
+            $progress->complete($project, $scan, $newSha);
+            return ['commit_sha' => $newSha, 'no_changes' => true];
         }
 
         // Get changed files
         $progress->startStage($project, $scan, 'manifest');
-        $changes = $this->getChangesFromPayload();
-
-        if (empty($changes['added']) && empty($changes['modified']) && empty($changes['deleted'])) {
-            // Fall back to git diff
-            $changes = $git->getChangedFiles($project, $previousSha, $newSha);
-        }
+        $changes = $git->getChangedFiles($project, $previousSha, $newSha);
 
         $totalChanges = count($changes['added']) + count($changes['modified']) + count($changes['deleted']);
 
-        if ($totalChanges === 0) {
-            Log::info('UpdateProjectFromWebhookJob: No changes detected', ['project_id' => $project->id]);
-            $progress->complete($project, $scan, $newSha);
-            return;
+        // If too many changes, do a full scan
+        if ($totalChanges > 500 || empty($previousSha)) {
+            return $this->runFullScan($project, $scan, $scanner, $stackDetector, $chunkBuilder, $progress, $newSha, $startTime);
         }
 
-        Log::info('UpdateProjectFromWebhookJob: Processing changes', [
+        $scan->update([
+            'is_incremental' => true,
+            'meta' => array_merge($scan->meta ?? [], [
+                'changes' => [
+                    'added' => count($changes['added']),
+                    'modified' => count($changes['modified']),
+                    'deleted' => count($changes['deleted']),
+                ],
+            ]),
+        ]);
+
+        Log::debug('UpdateProjectFromWebhookJob: Processing incremental changes', [
             'project_id' => $project->id,
             'added' => count($changes['added']),
             'modified' => count($changes['modified']),
@@ -153,25 +170,55 @@ class UpdateProjectFromWebhookJob implements ShouldQueue, ShouldBeUnique
         }
         $progress->completeStage($project, $scan, 'chunks');
 
-        // Finalize
+        // Build KB output
         $progress->startStage($project, $scan, 'finalize');
-        $progress->completeStage($project, $scan, 'finalize');
 
+        $kbBuilder = new KnowledgeBaseBuilder($project, $scan);
+        $kbValidation = $kbBuilder->build();
+
+        $durationMs = (int)((microtime(true) - $startTime) * 1000);
+
+        $project->update([
+            'scan_output_version' => '2.1.0',
+            'last_commit_sha' => $newSha,
+            'last_kb_scan_id' => $kbBuilder->getScanId(),
+            'scanned_at' => now(),
+        ]);
+
+        $scan->update([
+            'files_scanned' => count($updatedFiles),
+            'duration_ms' => $durationMs,
+        ]);
+
+        $project->cleanupOldKbScans(3);
+
+        $progress->completeStage($project, $scan, 'finalize');
         $progress->complete($project, $scan, $newSha);
+
+        return [
+            'commit_sha' => $newSha,
+            'updated_files' => count($updatedFiles),
+            'duration_ms' => $durationMs,
+            'kb_scan_id' => $kbBuilder->getScanId(),
+            'kb_validation' => $kbValidation,
+        ];
     }
 
     private function runFullScan(
-        Project $project,
-        ProjectScan $scan,
-        ScannerService $scanner,
-        StackDetector $stackDetector,
-        ChunkBuilder $chunkBuilder,
+        Project          $project,
+        ProjectScan      $scan,
+        ScannerService   $scanner,
+        StackDetector    $stackDetector,
+        ChunkBuilder     $chunkBuilder,
         ProgressReporter $progress,
-        string $commitSha,
-    ): void {
+        string           $commitSha,
+        float            $startTime,
+    ): array {
+        $scan->update(['is_incremental' => false]);
+
         // Full manifest scan
-        $result = $scanner->scanDirectory($project, function($processed, $total) use ($project, $scan, $progress) {
-            $percent = $total > 0 ? (int) (($processed / $total) * 100) : 0;
+        $result = $scanner->scanDirectory($project, function ($processed, $total) use ($project, $scan, $progress) {
+            $percent = $total > 0 ? (int)(($processed / $total) * 100) : 0;
             $progress->updateStage($project, $scan, 'manifest', $percent);
         });
         $scanner->persistManifest($project, $result['files']);
@@ -191,40 +238,49 @@ class UpdateProjectFromWebhookJob implements ShouldQueue, ShouldBeUnique
 
         // Build chunks
         $progress->startStage($project, $scan, 'chunks');
-        $chunkBuilder->build($project, function($processed, $total) use ($project, $scan, $progress) {
-            $percent = $total > 0 ? (int) (($processed / $total) * 100) : 0;
+        $chunkResult = $chunkBuilder->build($project, function ($processed, $total) use ($project, $scan, $progress) {
+            $percent = $total > 0 ? (int)(($processed / $total) * 100) : 0;
             $progress->updateStage($project, $scan, 'chunks', $percent);
         });
         $progress->completeStage($project, $scan, 'chunks');
 
-        // Finalize
+        // Build KB output
         $progress->startStage($project, $scan, 'finalize');
+
+        $kbBuilder = new KnowledgeBaseBuilder($project, $scan);
+        $kbValidation = $kbBuilder->build();
+
+        $durationMs = (int)((microtime(true) - $startTime) * 1000);
+
+        $project->update([
+            'scan_output_version' => '2.1.0',
+            'last_commit_sha' => $commitSha,
+            'last_kb_scan_id' => $kbBuilder->getScanId(),
+            'scanned_at' => now(),
+        ]);
+
+        $scan->update([
+            'files_scanned' => $result['stats']['total_files'],
+            'files_excluded' => $result['stats']['excluded_count'] ?? 0,
+            'chunks_created' => $chunkResult['total_chunks'] ?? 0,
+            'total_lines' => $result['stats']['total_lines'],
+            'total_bytes' => $result['stats']['total_bytes'],
+            'duration_ms' => $durationMs,
+        ]);
+
+        $project->cleanupOldKbScans(3);
+
         $progress->completeStage($project, $scan, 'finalize');
-
         $progress->complete($project, $scan, $commitSha);
-    }
 
-    private function getChangesFromPayload(): array
-    {
-        $changes = [
-            'added' => [],
-            'modified' => [],
-            'deleted' => [],
+        return [
+            'commit_sha' => $commitSha,
+            'total_files' => $result['stats']['total_files'],
+            'total_chunks' => $chunkResult['total_chunks'] ?? 0,
+            'duration_ms' => $durationMs,
+            'kb_scan_id' => $kbBuilder->getScanId(),
+            'kb_validation' => $kbValidation,
         ];
-
-        // Extract from GitHub push payload
-        foreach ($this->payload['commits'] ?? [] as $commit) {
-            $changes['added'] = array_merge($changes['added'], $commit['added'] ?? []);
-            $changes['modified'] = array_merge($changes['modified'], $commit['modified'] ?? []);
-            $changes['deleted'] = array_merge($changes['deleted'], $commit['removed'] ?? []);
-        }
-
-        // Remove duplicates
-        $changes['added'] = array_unique($changes['added']);
-        $changes['modified'] = array_unique($changes['modified']);
-        $changes['deleted'] = array_unique($changes['deleted']);
-
-        return $changes;
     }
 
     private function shouldRedetectStack(array $changes): bool
@@ -234,17 +290,17 @@ class UpdateProjectFromWebhookJob implements ShouldQueue, ShouldBeUnique
             'composer.lock',
             'package.json',
             'package-lock.json',
-            'tailwind.config.js',
-            'tailwind.config.ts',
             'vite.config.js',
             'vite.config.ts',
             'webpack.mix.js',
+            'tailwind.config.js',
+            'tailwind.config.ts',
         ];
 
-        $allChanges = array_merge($changes['added'], $changes['modified']);
+        $allChanges = array_merge($changes['added'], $changes['modified'], $changes['deleted']);
 
-        foreach ($allChanges as $file) {
-            if (in_array(basename($file), $stackFiles)) {
+        foreach ($allChanges as $path) {
+            if (in_array(basename($path), $stackFiles)) {
                 return true;
             }
         }
@@ -255,6 +311,7 @@ class UpdateProjectFromWebhookJob implements ShouldQueue, ShouldBeUnique
     private function recalculateStats(Project $project): void
     {
         $stats = $project->files()
+            ->where('is_excluded', false)
             ->selectRaw('COUNT(*) as total_files, SUM(line_count) as total_lines, SUM(size_bytes) as total_bytes')
             ->first();
 
@@ -275,19 +332,5 @@ class UpdateProjectFromWebhookJob implements ShouldQueue, ShouldBeUnique
         }
 
         return $account->access_token;
-    }
-
-    public function failed(Exception $exception): void
-    {
-        $project = Project::find($this->projectId);
-
-        if ($project) {
-            $project->markFailed('Webhook update failed: ' . $exception->getMessage());
-        }
-
-        Log::error('UpdateProjectFromWebhookJob: Permanently failed', [
-            'project_id' => $this->projectId,
-            'error' => $exception->getMessage(),
-        ]);
     }
 }
