@@ -7,4 +7,5 @@ return [
     App\Providers\HorizonServiceProvider::class,
     App\Providers\IntentAnalyzerServiceProvider::class,
     App\Providers\PromptServiceProvider::class,
+    App\Providers\RetrievalServiceProvider::class,
 ];

@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Events\ProjectScanCompleted;
 use App\Models\Project;
 use App\Models\ProjectScan;
 use App\Services\Projects\ChunkBuilder;
@@ -216,6 +217,13 @@ class ScanProjectPipelineJob implements ShouldQueue, ShouldBeUnique
 
         $project->cleanupOldKbScans(3);
         $progress->completeStage($project, $scan, 'finalize');
+
+        event(new ProjectScanCompleted($project, $kbBuilder->getScanId(), [
+            'files' => $result['stats']['total_files'],
+            'chunks' => $chunkResult['total_chunks'] ?? 0,
+            'duration_ms' => $durationMs,
+        ]));
+
 
         return [
             'commit_sha' => $commitSha,
