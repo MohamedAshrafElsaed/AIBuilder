@@ -36,6 +36,7 @@ class ProjectFileChunk extends Model
     protected function casts(): array
     {
         return [
+            'project_id' => 'string',
             'is_complete_file' => 'boolean',
             'symbols_declared' => 'array',
             'symbols_used' => 'array',
@@ -102,9 +103,6 @@ class ProjectFileChunk extends Model
     // Helper Methods
     // -------------------------------------------------------------------------
 
-    /**
-     * Get the content of this chunk from the repository.
-     */
     public function getContent(Project $project): ?string
     {
         $fullPath = $project->repo_path . '/' . $this->path;
@@ -120,7 +118,6 @@ class ProjectFileChunk extends Model
 
         $lines = explode("\n", $content);
 
-        // Validate line numbers
         $startLine = max(1, $this->start_line);
         $endLine = min(count($lines), $this->end_line);
 
@@ -133,9 +130,6 @@ class ProjectFileChunk extends Model
         return implode("\n", $chunkLines);
     }
 
-    /**
-     * Verify that the stored chunk_sha1 matches the current content.
-     */
     public function verifySha1(Project $project): bool
     {
         $content = $this->getContent($project);
@@ -147,25 +141,14 @@ class ProjectFileChunk extends Model
         return sha1($content) === $this->chunk_sha1;
     }
 
-    /**
-     * Verify that the chunk_id is correctly computed.
-     */
     public function verifyChunkId(): bool
     {
         $expectedId = self::generateChunkId($this->path, $this->sha1, $this->start_line, $this->end_line);
         return $this->chunk_id === $expectedId;
     }
 
-    // generateChunkId() is provided by HasDeterministicChunkId trait
-
-    /**
-     * Parse a chunk_id to extract components (for legacy format).
-     *
-     * @deprecated Use generateChunkId() instead for new format.
-     */
     public static function parseChunkId(string $chunkId): ?array
     {
-        // New format: 16-char hex string
         if (preg_match('/^[a-f0-9]{16}$/', $chunkId)) {
             return [
                 'format' => 'new',
@@ -173,7 +156,6 @@ class ProjectFileChunk extends Model
             ];
         }
 
-        // Legacy format: path_hash:start-end
         if (preg_match('/^([a-f0-9]{12}):(\d+)-(\d+)$/', $chunkId, $matches)) {
             return [
                 'format' => 'legacy_v2',
@@ -183,7 +165,6 @@ class ProjectFileChunk extends Model
             ];
         }
 
-        // Old format: chunk_XXXX
         if (preg_match('/^chunk_(\d{4})$/', $chunkId, $matches)) {
             return [
                 'format' => 'legacy_v1',
@@ -194,32 +175,21 @@ class ProjectFileChunk extends Model
         return null;
     }
 
-    /**
-     * Check if this is an old-format chunk_id.
-     */
     public static function isOldFormat(string $chunkId): bool
     {
         return (bool)preg_match('/^chunk_\d{4}$/', $chunkId);
     }
 
-    /**
-     * Check if this is a legacy v2 format chunk_id (path_hash:lines).
-     */
     public static function isLegacyV2Format(string $chunkId): bool
     {
         return (bool)preg_match('/^[a-f0-9]{12}:\d+-\d+$/', $chunkId);
     }
 
-    /**
-     * Check if this is the new deterministic format.
-     * Uses isValidChunkIdFormat() from HasDeterministicChunkId trait.
-     */
     public static function isNewFormat(string $chunkId): bool
     {
         return self::isValidChunkIdFormat($chunkId);
     }
 
-    // Model methods can now use the trait:
     public function regenerateChunkId(): string
     {
         $newId = self::generateChunkId($this->path, $this->sha1, $this->start_line, $this->end_line);

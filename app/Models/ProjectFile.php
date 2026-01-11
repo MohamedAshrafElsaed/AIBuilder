@@ -35,6 +35,7 @@ class ProjectFile extends Model
     protected function casts(): array
     {
         return [
+            'project_id' => 'string',
             'is_binary' => 'boolean',
             'is_excluded' => 'boolean',
             'framework_hints' => 'array',
@@ -154,9 +155,6 @@ class ProjectFile extends Model
         return @file_get_contents($fullPath);
     }
 
-    /**
-     * Generate stable file_id from path
-     */
     public static function generateFileId(string $path): string
     {
         return 'f_' . substr(sha1($path), 0, 12);

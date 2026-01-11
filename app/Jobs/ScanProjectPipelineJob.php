@@ -23,12 +23,12 @@ class ScanProjectPipelineJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $timeout = 600; // 10 minutes
+    public int $timeout = 600;
     public int $tries = 3;
     public int $backoff = 60;
 
     public function __construct(
-        public int    $projectId,
+        public string $projectId,
         public string $trigger = 'manual',
         public bool   $forceFull = false,
     ) {}
@@ -48,7 +48,6 @@ class ScanProjectPipelineJob implements ShouldQueue
             return;
         }
 
-        // Create scan record
         $scan = ProjectScan::create([
             'project_id' => $project->id,
             'status' => 'running',
@@ -57,8 +56,7 @@ class ScanProjectPipelineJob implements ShouldQueue
             'scanner_version' => '2.1.0',
         ]);
 
-        // Start scanning
-        $project->markScanning('workspace', 0);
+        $project->markScanning();
 
         try {
             $result = $this->runPipeline(
@@ -108,12 +106,10 @@ class ScanProjectPipelineJob implements ShouldQueue
     ): array {
         $startTime = microtime(true);
 
-        // Stage 1: Workspace
         $progress->startStage($project, $scan, 'workspace');
         $git->ensureWorkspace($project);
         $progress->completeStage($project, $scan, 'workspace');
 
-        // Stage 2: Clone/Update Repository
         $progress->startStage($project, $scan, 'clone');
         $token = $this->getGitHubToken($project);
         $commitSha = $git->cloneOrUpdate($project, $token);
@@ -123,41 +119,34 @@ class ScanProjectPipelineJob implements ShouldQueue
         ]);
         $progress->completeStage($project, $scan, 'clone');
 
-        // Stage 3: Build File Manifest
         $progress->startStage($project, $scan, 'manifest');
         $result = $scanner->scanDirectory($project, function ($processed, $total) use ($project, $scan, $progress) {
             $percent = $total > 0 ? (int)(($processed / $total) * 100) : 0;
             $progress->updateStage($project, $scan, 'manifest', $percent);
         });
 
-        // Persist manifest to database
         $scanner->persistManifest($project, $result['files']);
 
-        // Update project stats
         $project->updateStats(
             $result['stats']['total_files'],
             $result['stats']['total_lines'],
             $result['stats']['total_bytes']
         );
 
-        // Store exclusion rules version
         $project->update([
             'exclusion_rules_version' => $result['exclusion_rules_version'] ?? null,
         ]);
 
-        // Save exclusion log for debugging
         $this->saveExclusionLog($project, $result['exclusion_log'] ?? []);
 
         $progress->completeStage($project, $scan, 'manifest');
 
-        // Stage 4: Detect Stack
         $progress->startStage($project, $scan, 'stack');
         $stack = $stackDetector->detect($project);
         $project->updateStackInfo($stack);
         $stackDetector->saveStackJson($project, $stack);
         $progress->completeStage($project, $scan, 'stack');
 
-        // Stage 5: Build Knowledge Chunks
         $progress->startStage($project, $scan, 'chunks');
         $chunkResult = $chunkBuilder->build($project, function ($processed, $total) use ($project, $scan, $progress) {
             $percent = $total > 0 ? (int)(($processed / $total) * 100) : 0;
@@ -165,17 +154,13 @@ class ScanProjectPipelineJob implements ShouldQueue
         });
         $progress->completeStage($project, $scan, 'chunks');
 
-        // Stage 6: Build Knowledge Base Output
         $progress->startStage($project, $scan, 'finalize');
 
-        // Extract routes from all route files recursively
         $routes = $routesExtractor->save($project);
 
-        // Build standardized knowledge base output
         $kbBuilder = new KnowledgeBaseBuilder($project, $scan);
         $kbValidation = $kbBuilder->build();
 
-        // Update project with KB scan ID
         $project->update([
             'scan_output_version' => '2.1.0',
             'last_commit_sha' => $commitSha,
@@ -183,7 +168,6 @@ class ScanProjectPipelineJob implements ShouldQueue
             'scanned_at' => now(),
         ]);
 
-        // Update scan record with stats
         $durationMs = (int)((microtime(true) - $startTime) * 1000);
         $scan->update([
             'files_scanned' => $result['stats']['total_files'],
@@ -194,7 +178,6 @@ class ScanProjectPipelineJob implements ShouldQueue
             'duration_ms' => $durationMs,
         ]);
 
-        // Cleanup old KB scans (keep last 3)
         $project->cleanupOldKbScans(3);
 
         $progress->completeStage($project, $scan, 'finalize');

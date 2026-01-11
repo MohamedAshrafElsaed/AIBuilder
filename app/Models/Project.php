@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Database\Factories\ProjectFactory;
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -11,7 +12,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Project extends Model
 {
     /** @use HasFactory<ProjectFactory> */
-    use HasFactory;
+    use HasFactory, HasUuids;
+
+    protected $keyType = 'string';
+    public $incrementing = false;
 
     protected $fillable = [
         'user_id',
@@ -104,25 +108,16 @@ class Project extends Model
         return $this->knowledge_path . '/indexes';
     }
 
-    /**
-     * Get the base path for KB scan outputs (unified under knowledge_path).
-     */
     public function getKbBasePathAttribute(): string
     {
         return $this->knowledge_path . '/scans';
     }
 
-    /**
-     * Get the path for a specific scan's knowledge base output.
-     */
     public function getKbScanPath(string $scanId): string
     {
         return $this->kb_base_path . '/' . $scanId;
     }
 
-    /**
-     * Get the path for the latest scan's knowledge base output.
-     */
     public function getLatestKbPathAttribute(): ?string
     {
         if (!$this->last_kb_scan_id) {
@@ -131,17 +126,11 @@ class Project extends Model
         return $this->getKbScanPath($this->last_kb_scan_id);
     }
 
-    /**
-     * Get the scan_meta.json path for a scan.
-     */
     public function getKbScanMetaPath(string $scanId): string
     {
         return $this->getKbScanPath($scanId) . '/scan_meta.json';
     }
 
-    /**
-     * Get the files_index path for a scan (json or ndjson).
-     */
     public function getKbFilesIndexPath(string $scanId): string
     {
         $basePath = $this->getKbScanPath($scanId);
@@ -151,25 +140,16 @@ class Project extends Model
         return $basePath . '/files_index.json';
     }
 
-    /**
-     * Get the chunks.ndjson path for a scan.
-     */
     public function getKbChunksPath(string $scanId): string
     {
         return $this->getKbScanPath($scanId) . '/chunks.ndjson';
     }
 
-    /**
-     * Get the directory_stats.json path for a scan.
-     */
     public function getKbDirectoryStatsPath(string $scanId): string
     {
         return $this->getKbScanPath($scanId) . '/directory_stats.json';
     }
 
-    /**
-     * List all available scan IDs for this project.
-     */
     public function listKbScans(): array
     {
         $basePath = $this->kb_base_path;
@@ -370,9 +350,6 @@ class Project extends Model
         }
     }
 
-    /**
-     * Clean up old KB scans, keeping only the latest N.
-     */
     public function cleanupOldKbScans(int $keep = 3): void
     {
         $scans = $this->listKbScans();

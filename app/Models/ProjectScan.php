@@ -37,6 +37,7 @@ class ProjectScan extends Model
     protected function casts(): array
     {
         return [
+            'project_id' => 'string',
             'started_at' => 'datetime',
             'finished_at' => 'datetime',
             'is_incremental' => 'boolean',

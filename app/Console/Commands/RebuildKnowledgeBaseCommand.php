@@ -12,7 +12,7 @@ use Illuminate\Console\Command;
 class RebuildKnowledgeBaseCommand extends Command
 {
     protected $signature = 'kb:rebuild
-                            {project : Project ID to rebuild}
+                            {project : Project UUID to rebuild}
                             {--chunks : Also rebuild chunks from source files}
                             {--full : Full rebuild including file manifest}';
 
@@ -30,37 +30,33 @@ class RebuildKnowledgeBaseCommand extends Command
 
         if (!$project) {
             $this->error("Project not found: {$projectId}");
-            return 1;
+            return self::FAILURE;
         }
 
         if (!$project->hasLocalRepo()) {
             $this->error("Project has no local repository. Run a scan first.");
-            return 1;
+            return self::FAILURE;
         }
 
         $this->info("Rebuilding knowledge base for: {$project->repo_full_name}");
 
         try {
-            // Full rebuild includes file manifest
             if ($fullRebuild) {
                 $this->rebuildFull($project, $scanner, $chunkBuilder);
-            }
-            // Chunks-only rebuild
-            elseif ($rebuildChunks) {
+            } elseif ($rebuildChunks) {
                 $this->rebuildChunks($project, $chunkBuilder);
             }
 
-            // Always rebuild KB output
             $this->rebuildKbOutput($project);
 
             $this->info("\n✓ Knowledge base rebuilt successfully!");
             $this->line("  Scan ID: {$project->last_kb_scan_id}");
             $this->line("  Output: {$project->latest_kb_path}");
 
-            return 0;
+            return self::SUCCESS;
         } catch (\Exception $e) {
             $this->error("Rebuild failed: {$e->getMessage()}");
-            return 1;
+            return self::FAILURE;
         }
     }
 
@@ -105,7 +101,6 @@ class RebuildKnowledgeBaseCommand extends Command
     {
         $this->line("\n[3/3] Building knowledge base output...");
 
-        // Create or get latest scan record
         $scan = $project->latestScan();
         if (!$scan) {
             $scan = ProjectScan::create([
