@@ -21,4 +21,8 @@ Route::middleware(['web', 'auth', 'verified'])->group(function () {
 
     Route::get('/projects/{project}/ask/context', [ProjectAskController::class, 'context'])
         ->name('api.projects.ask.context');
+
+    // AI Agent Conversation Routes
+    Route::prefix('projects/{project}/ai')
+        ->group(base_path('routes/ai.php'));
 });

@@ -25,10 +25,10 @@ return [
     'agents' => [
         'orchestrator' => [
             'system_prompt' => 'system/orchestrator.md',
-            'model' => env('AI_MODEL', 'claude-sonnet-4-5-20250514'),
-            'max_tokens' => 4096,
+            'model' => env('ORCHESTRATOR_MODEL', 'claude-sonnet-4-5-20250514'),
+            'max_tokens' => env('ORCHESTRATOR_MAX_TOKENS', 4096),
             'temperature' => 0.3,
-            'description' => 'Main coordinator agent that routes requests',
+            'description' => 'Main coordinator agent that routes requests and manages workflow',
         ],
         'planner' => [
             'system_prompt' => 'system/code_planner.md',
@@ -43,7 +43,7 @@ return [
             'model' => env('EXECUTION_MODEL', 'claude-sonnet-4-5-20250514'),
             'max_tokens' => 8192,
             'temperature' => 0.2,
-            'description' => 'Generates precise code changes based on approved plans',
+            'description' => 'Generates precise code changes',
         ],
         'intent_analyzer' => [
             'system_prompt' => 'system/intent_analyzer.md',
