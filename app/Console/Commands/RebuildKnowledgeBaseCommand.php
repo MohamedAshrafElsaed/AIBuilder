@@ -32,7 +32,7 @@ class RebuildKnowledgeBaseCommand extends Command
             $this->error("Project not found: {$projectId}");
             return self::FAILURE;
         }
-
+dd($project->hasLocalRepo());
         if (!$project->hasLocalRepo()) {
             $this->error("Project has no local repository. Run a scan first.");
             return self::FAILURE;

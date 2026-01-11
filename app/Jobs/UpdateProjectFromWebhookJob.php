@@ -25,17 +25,45 @@ class UpdateProjectFromWebhookJob implements ShouldQueue, ShouldBeUnique
 
     public int $timeout = 300;
     public int $tries = 3;
-    public int $backoff = 30;
+    public array $backoff = [15, 30, 60];
     public int $uniqueFor = 60;
 
     public function __construct(
         public string $projectId,
         public array  $payload,
-    ) {}
+    ) {
+        $this->onQueue('webhooks');
+    }
 
+    /**
+     * Unique ID for preventing duplicate jobs.
+     */
     public function uniqueId(): string
     {
-        return 'webhook_update_' . $this->projectId;
+        return 'webhook_' . $this->projectId;
+    }
+
+    /**
+     * Display name for Horizon UI.
+     */
+    public function displayName(): string
+    {
+        $ref = $this->payload['ref'] ?? 'unknown';
+        $branch = str_replace('refs/heads/', '', $ref);
+        return "Webhook Update [{$this->projectId}] ({$branch})";
+    }
+
+    /**
+     * Tags for Horizon monitoring and filtering.
+     */
+    public function tags(): array
+    {
+        return [
+            'webhook',
+            'incremental',
+            'project:' . $this->projectId,
+            'sender:' . ($this->payload['sender']['login'] ?? 'unknown'),
+        ];
     }
 
     public function handle(
@@ -53,7 +81,10 @@ class UpdateProjectFromWebhookJob implements ShouldQueue, ShouldBeUnique
         }
 
         if ($project->isScanning()) {
-            Log::info('UpdateProjectFromWebhookJob: Project already scanning, skipping', ['project_id' => $this->projectId]);
+            Log::info('UpdateProjectFromWebhookJob: Project already scanning, skipping', [
+                'project_id' => $this->projectId,
+                'repo' => $project->repo_full_name,
+            ]);
             return;
         }
 
@@ -63,7 +94,14 @@ class UpdateProjectFromWebhookJob implements ShouldQueue, ShouldBeUnique
             'trigger' => 'webhook',
             'started_at' => now(),
             'scanner_version' => '2.1.0',
-            'meta' => ['payload' => $this->payload],
+            'is_incremental' => true,
+            'meta' => [
+                'ref' => $this->payload['ref'] ?? null,
+                'before' => $this->payload['before'] ?? null,
+                'after' => $this->payload['after'] ?? null,
+                'pusher' => $this->payload['pusher']['name'] ?? null,
+                'commits_count' => count($this->payload['commits'] ?? []),
+            ],
         ]);
 
         $project->markScanning();
@@ -73,14 +111,17 @@ class UpdateProjectFromWebhookJob implements ShouldQueue, ShouldBeUnique
 
             Log::info('UpdateProjectFromWebhookJob: Completed', [
                 'project_id' => $project->id,
-                'kb_scan_id' => $result['kb_scan_id'] ?? null,
-                'commit_sha' => $result['commit_sha'] ?? null,
-                'total_files' => $result['total_files'] ?? 0,
-                'total_chunks' => $result['total_chunks'] ?? 0,
+                'repo' => $project->repo_full_name,
+                'scan_id' => $result['kb_scan_id'] ?? null,
+                'commit_sha' => substr($result['commit_sha'], 0, 8),
+                'files' => $result['total_files'],
+                'chunks' => $result['total_chunks'],
+                'duration_ms' => $result['duration_ms'],
             ]);
         } catch (Exception $e) {
             Log::error('UpdateProjectFromWebhookJob: Failed', [
                 'project_id' => $project->id,
+                'repo' => $project->repo_full_name,
                 'error' => $e->getMessage(),
             ]);
 
@@ -102,20 +143,19 @@ class UpdateProjectFromWebhookJob implements ShouldQueue, ShouldBeUnique
         $startTime = microtime(true);
         $previousSha = $project->last_commit_sha;
 
+        // Stage 1: Fetch Latest Changes
         $progress->startStage($project, $scan, 'clone');
         $token = $this->getGitHubToken($project);
         $commitSha = $git->cloneOrUpdate($project, $token);
         $scan->update([
             'commit_sha' => $commitSha,
             'previous_commit_sha' => $previousSha,
-            'is_incremental' => true,
         ]);
         $progress->completeStage($project, $scan, 'clone');
 
+        // Stage 2: Process Changed Files
         $progress->startStage($project, $scan, 'manifest');
         $changes = $git->getChangedFiles($project, $previousSha, $commitSha);
-
-        $result = ['stats' => ['total_files' => 0, 'total_lines' => 0, 'total_bytes' => 0]];
 
         if (!empty($changes['added']) || !empty($changes['modified']) || !empty($changes['deleted'])) {
             $updatedPaths = $scanner->updateChangedFiles($project, $changes);
@@ -135,6 +175,7 @@ class UpdateProjectFromWebhookJob implements ShouldQueue, ShouldBeUnique
 
         $progress->completeStage($project, $scan, 'manifest');
 
+        // Stage 3: Rebuild Knowledge Base
         $progress->startStage($project, $scan, 'finalize');
 
         $kbBuilder = new KnowledgeBaseBuilder($project, $scan);
@@ -221,5 +262,19 @@ class UpdateProjectFromWebhookJob implements ShouldQueue, ShouldBeUnique
         }
 
         return $account->access_token;
+    }
+
+    public function failed(Exception $exception): void
+    {
+        $project = Project::find($this->projectId);
+
+        if ($project) {
+            $project->markFailed('Webhook update failed: ' . $exception->getMessage());
+        }
+
+        Log::error('UpdateProjectFromWebhookJob: Failed permanently', [
+            'project_id' => $this->projectId,
+            'error' => $exception->getMessage(),
+        ]);
     }
 }

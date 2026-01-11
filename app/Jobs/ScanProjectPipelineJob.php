@@ -13,26 +13,61 @@ use App\Services\Projects\ScannerService;
 use App\Services\Projects\StackDetector;
 use Exception;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 
-class ScanProjectPipelineJob implements ShouldQueue
+class ScanProjectPipelineJob implements ShouldQueue, ShouldBeUnique
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $timeout = 600;
     public int $tries = 3;
-    public int $backoff = 60;
+    public array $backoff = [30, 60, 120];
+    public int $uniqueFor = 300;
 
     public function __construct(
         public string $projectId,
         public string $trigger = 'manual',
         public bool   $forceFull = false,
-    ) {}
+    ) {
+        $this->onQueue('scans');
+    }
 
+    /**
+     * Unique ID for preventing duplicate jobs.
+     */
+    public function uniqueId(): string
+    {
+        return 'scan_project_' . $this->projectId;
+    }
+
+    /**
+     * Display name for Horizon UI.
+     */
+    public function displayName(): string
+    {
+        return "Scan Project [{$this->projectId}]";
+    }
+
+    /**
+     * Tags for Horizon monitoring and filtering.
+     */
+    public function tags(): array
+    {
+        return [
+            'scan',
+            'project:' . $this->projectId,
+            'trigger:' . $this->trigger,
+        ];
+    }
+
+    /**
+     * @throws Exception
+     */
     public function handle(
         GitService       $git,
         ScannerService   $scanner,
@@ -72,20 +107,20 @@ class ScanProjectPipelineJob implements ShouldQueue
 
             $progress->complete($project, $scan, $result['commit_sha']);
 
-            Log::info('ScanProjectPipelineJob: Completed successfully', [
+            Log::info('ScanProjectPipelineJob: Completed', [
                 'project_id' => $project->id,
+                'repo' => $project->repo_full_name,
                 'scan_id' => $result['kb_scan_id'] ?? null,
-                'commit_sha' => $result['commit_sha'],
-                'total_files' => $result['total_files'],
-                'total_chunks' => $result['total_chunks'],
-                'excluded_files' => $result['excluded_files'],
-                'kb_validation' => $result['kb_validation'] ?? null,
+                'commit_sha' => substr($result['commit_sha'], 0, 8),
+                'files' => $result['total_files'],
+                'chunks' => $result['total_chunks'],
+                'duration_ms' => $result['duration_ms'],
             ]);
         } catch (Exception $e) {
             Log::error('ScanProjectPipelineJob: Failed', [
                 'project_id' => $project->id,
+                'repo' => $project->repo_full_name,
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
             ]);
 
             $progress->fail($project, $scan, $e->getMessage());
@@ -94,6 +129,9 @@ class ScanProjectPipelineJob implements ShouldQueue
         }
     }
 
+    /**
+     * @throws Exception
+     */
     private function runPipeline(
         Project          $project,
         ProjectScan      $scan,
@@ -106,10 +144,12 @@ class ScanProjectPipelineJob implements ShouldQueue
     ): array {
         $startTime = microtime(true);
 
+        // Stage 1: Prepare Workspace
         $progress->startStage($project, $scan, 'workspace');
         $git->ensureWorkspace($project);
         $progress->completeStage($project, $scan, 'workspace');
 
+        // Stage 2: Clone Repository
         $progress->startStage($project, $scan, 'clone');
         $token = $this->getGitHubToken($project);
         $commitSha = $git->cloneOrUpdate($project, $token);
@@ -119,6 +159,7 @@ class ScanProjectPipelineJob implements ShouldQueue
         ]);
         $progress->completeStage($project, $scan, 'clone');
 
+        // Stage 3: Build File Manifest
         $progress->startStage($project, $scan, 'manifest');
         $result = $scanner->scanDirectory($project, function ($processed, $total) use ($project, $scan, $progress) {
             $percent = $total > 0 ? (int)(($processed / $total) * 100) : 0;
@@ -126,27 +167,23 @@ class ScanProjectPipelineJob implements ShouldQueue
         });
 
         $scanner->persistManifest($project, $result['files']);
-
         $project->updateStats(
             $result['stats']['total_files'],
             $result['stats']['total_lines'],
             $result['stats']['total_bytes']
         );
-
-        $project->update([
-            'exclusion_rules_version' => $result['exclusion_rules_version'] ?? null,
-        ]);
-
+        $project->update(['exclusion_rules_version' => $result['exclusion_rules_version'] ?? null]);
         $this->saveExclusionLog($project, $result['exclusion_log'] ?? []);
-
         $progress->completeStage($project, $scan, 'manifest');
 
+        // Stage 4: Detect Technology Stack
         $progress->startStage($project, $scan, 'stack');
         $stack = $stackDetector->detect($project);
         $project->updateStackInfo($stack);
         $stackDetector->saveStackJson($project, $stack);
         $progress->completeStage($project, $scan, 'stack');
 
+        // Stage 5: Build Code Chunks
         $progress->startStage($project, $scan, 'chunks');
         $chunkResult = $chunkBuilder->build($project, function ($processed, $total) use ($project, $scan, $progress) {
             $percent = $total > 0 ? (int)(($processed / $total) * 100) : 0;
@@ -154,10 +191,9 @@ class ScanProjectPipelineJob implements ShouldQueue
         });
         $progress->completeStage($project, $scan, 'chunks');
 
+        // Stage 6: Build Knowledge Base
         $progress->startStage($project, $scan, 'finalize');
-
         $routes = $routesExtractor->save($project);
-
         $kbBuilder = new KnowledgeBaseBuilder($project, $scan);
         $kbValidation = $kbBuilder->build();
 
@@ -179,7 +215,6 @@ class ScanProjectPipelineJob implements ShouldQueue
         ]);
 
         $project->cleanupOldKbScans(3);
-
         $progress->completeStage($project, $scan, 'finalize');
 
         return [
@@ -229,7 +264,7 @@ class ScanProjectPipelineJob implements ShouldQueue
             $project->markFailed('Job failed after retries: ' . $exception->getMessage());
         }
 
-        Log::error('ScanProjectPipelineJob: Job failed permanently', [
+        Log::error('ScanProjectPipelineJob: Failed permanently', [
             'project_id' => $this->projectId,
             'error' => $exception->getMessage(),
         ]);
