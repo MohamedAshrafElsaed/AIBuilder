@@ -17,6 +17,7 @@ class GitService
             $project->knowledge_path,
             $project->chunks_path,
             $project->indexes_path,
+            $project->kb_base_path,
         ];
 
         foreach ($paths as $path) {
@@ -43,7 +44,6 @@ class GitService
         $repoPath = $project->repo_path;
         $branch = $project->default_branch;
 
-        // Use shallow clone for faster initial setup
         $result = Process::timeout(300)
             ->path(dirname($repoPath))
             ->run([
@@ -69,10 +69,8 @@ class GitService
         $repoPath = $project->repo_path;
         $branch = $project->default_branch;
 
-        // Update remote URL with token for authentication
         $this->updateRemoteUrl($project, $token);
 
-        // Fetch latest changes
         $result = Process::timeout(120)
             ->path($repoPath)
             ->run(['git', 'fetch', 'origin', $branch]);
@@ -82,7 +80,6 @@ class GitService
             throw new Exception('Failed to fetch repository: ' . $error);
         }
 
-        // Reset to latest
         $result = Process::timeout(60)
             ->path($repoPath)
             ->run(['git', 'reset', '--hard', "origin/{$branch}"]);
@@ -91,7 +88,6 @@ class GitService
             throw new Exception('Failed to reset repository: ' . $result->errorOutput());
         }
 
-        // Clean untracked files
         Process::timeout(60)->path($repoPath)->run(['git', 'clean', '-fd']);
 
         return $this->getCurrentCommitSha($project);
@@ -146,7 +142,7 @@ class GitService
                 'A' => $changes['added'][] = $path,
                 'M' => $changes['modified'][] = $path,
                 'D' => $changes['deleted'][] = $path,
-                'R' => $changes['modified'][] = $path, // Renamed
+                'R' => $changes['modified'][] = $path,
                 default => null,
             };
         }
@@ -156,7 +152,6 @@ class GitService
 
     private function getAuthenticatedUrl(Project $project, string $token): string
     {
-        // Format: https://TOKEN@github.com/owner/repo.git
         return sprintf(
             'https://%s@github.com/%s.git',
             $token,
@@ -166,13 +161,11 @@ class GitService
 
     private function sanitizeGitOutput(string $output, string $token): string
     {
-        // Never log the token
         return str_replace($token, '[REDACTED]', $output);
     }
 
     public function validateRepoPath(string $path): bool
     {
-        // Prevent path traversal attacks
         $realPath = realpath($path);
         $storagePath = realpath(config('projects.storage_path'));
 

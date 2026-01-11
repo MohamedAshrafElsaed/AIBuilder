@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Log;
  * Builds standardized knowledge base output with deterministic chunk IDs.
  *
  * Output structure:
- * storage/app/project_kb/{project_id}/{scan_id}/
+ * storage/app/projects/{project_id}/knowledge/scans/{scan_id}/
  *   ├── scan_meta.json
  *   ├── files_index.json (or .ndjson if > 10k files)
  *   ├── chunks.ndjson
@@ -31,7 +31,6 @@ class KnowledgeBaseBuilder
     private string $outputPath;
     private int $startTimeMs;
 
-    // Validation counters
     private int $filesIndexCount = 0;
     private int $chunksCount = 0;
     private array $chunkIdsInIndex = [];
@@ -46,32 +45,21 @@ class KnowledgeBaseBuilder
     }
 
     /**
-     * Build the complete knowledge base output.
-     *
-     * @throws Exception if git state is invalid
-     * @return array Validation summary
+     * @throws Exception
      */
     public function build(): array
     {
-        // Validate git state first
         $this->validateGitState();
-
-        // Generate deterministic scan ID
         $this->scanId = $this->generateScanId();
-
-        // Create output directory
         $this->outputPath = $this->createOutputDirectory();
 
-        // Build all artifacts
         $this->buildScanMeta();
         $this->buildFilesIndex();
         $this->buildChunksNdjson();
         $this->buildDirectoryStats();
 
-        // Validate consistency
         $validation = $this->validateConsistency();
 
-        // Update scan record with output path
         $this->scan->update([
             'meta' => array_merge($this->scan->meta ?? [], [
                 'kb_output_path' => $this->outputPath,
@@ -90,7 +78,7 @@ class KnowledgeBaseBuilder
     }
 
     /**
-     * Validate that the repository is in a clean, checked-out state.
+     * @throws Exception
      */
     private function validateGitState(): void
     {
@@ -100,7 +88,6 @@ class KnowledgeBaseBuilder
             throw new Exception("Repository not found at: {$repoPath}");
         }
 
-        // Get current HEAD commit
         $headFile = $repoPath . '/.git/HEAD';
         if (!file_exists($headFile)) {
             throw new Exception("Invalid git repository: HEAD file missing");
@@ -108,7 +95,6 @@ class KnowledgeBaseBuilder
 
         $headContent = trim(file_get_contents($headFile));
 
-        // HEAD should point to a ref or be a detached commit
         if (str_starts_with($headContent, 'ref: ')) {
             $refPath = $repoPath . '/.git/' . substr($headContent, 5);
             if (!file_exists($refPath)) {
@@ -116,7 +102,6 @@ class KnowledgeBaseBuilder
             }
         }
 
-        // Verify we have a valid commit SHA
         $commitSha = $this->getHeadCommitSha();
         if (!$commitSha || strlen($commitSha) !== 40) {
             throw new Exception("Invalid HEAD commit SHA: {$commitSha}");
@@ -124,7 +109,7 @@ class KnowledgeBaseBuilder
     }
 
     /**
-     * Get the current HEAD commit SHA directly from git files.
+     * @throws Exception
      */
     private function getHeadCommitSha(): string
     {
@@ -137,7 +122,6 @@ class KnowledgeBaseBuilder
             if (file_exists($refPath)) {
                 return trim(file_get_contents($refPath));
             }
-            // Try packed-refs
             $packedRefs = $repoPath . '/.git/packed-refs';
             if (file_exists($packedRefs)) {
                 $ref = substr($headContent, 5);
@@ -153,12 +137,11 @@ class KnowledgeBaseBuilder
             throw new Exception("Cannot resolve ref: " . substr($headContent, 5));
         }
 
-        // Detached HEAD - content is the SHA
         return $headContent;
     }
 
     /**
-     * Generate a deterministic scan ID based on project + commit + timestamp.
+     * @throws Exception
      */
     private function generateScanId(): string
     {
@@ -167,13 +150,9 @@ class KnowledgeBaseBuilder
         return "scan_{$this->project->id}_{$commitShort}_{$timestamp}";
     }
 
-    /**
-     * Create the output directory structure.
-     */
     private function createOutputDirectory(): string
     {
-        $basePath = storage_path('app/project_kb');
-        $outputPath = "{$basePath}/{$this->project->id}/{$this->scanId}";
+        $outputPath = $this->project->getKbScanPath($this->scanId);
 
         if (!is_dir($outputPath)) {
             mkdir($outputPath, 0755, true);
@@ -183,7 +162,7 @@ class KnowledgeBaseBuilder
     }
 
     /**
-     * Build scan_meta.json with complete metadata.
+     * @throws Exception
      */
     private function buildScanMeta(): void
     {
@@ -218,10 +197,6 @@ class KnowledgeBaseBuilder
         $this->writeJson($this->outputPath . '/scan_meta.json', $meta);
     }
 
-    /**
-     * Build files_index.json with chunk ID references.
-     * Uses NDJSON format for large repositories.
-     */
     private function buildFilesIndex(): void
     {
         $files = $this->project->files()->orderBy('path')->get();
@@ -235,7 +210,6 @@ class KnowledgeBaseBuilder
         foreach ($files as $file) {
             $fileChunks = $chunks->get($file->path, collect());
 
-            // Generate chunk IDs that match what we'll write to chunks.ndjson
             $chunkIds = $fileChunks->map(function ($chunk) use ($file) {
                 return $this->generateChunkId(
                     $file->path,
@@ -245,7 +219,6 @@ class KnowledgeBaseBuilder
                 );
             })->toArray();
 
-            // Track for validation
             $this->chunkIdsInIndex = array_merge($this->chunkIdsInIndex, $chunkIds);
 
             $record = [
@@ -279,9 +252,6 @@ class KnowledgeBaseBuilder
         }
     }
 
-    /**
-     * Build chunks.ndjson with actual chunk content.
-     */
     private function buildChunksNdjson(): void
     {
         $outputFile = $this->outputPath . '/chunks.ndjson';
@@ -297,11 +267,9 @@ class KnowledgeBaseBuilder
             ->cursor();
 
         foreach ($chunks as $chunk) {
-            // Get the file SHA1 for this chunk
             $file = $this->project->files()->where('path', $chunk->path)->first();
             $fileSha1 = $file ? $file->sha1 : $chunk->sha1;
 
-            // Generate the deterministic chunk ID
             $chunkId = $this->generateChunkId(
                 $chunk->path,
                 $fileSha1,
@@ -309,10 +277,8 @@ class KnowledgeBaseBuilder
                 $chunk->end_line
             );
 
-            // Track for validation
             $this->chunkIdsInChunks[] = $chunkId;
 
-            // Get chunk content
             $content = $this->getChunkContent($chunk);
 
             $record = [
@@ -340,14 +306,10 @@ class KnowledgeBaseBuilder
         fclose($handle);
     }
 
-    /**
-     * Build directory_stats.json with aggregated statistics.
-     */
     private function buildDirectoryStats(): void
     {
         $files = $this->project->files()->where('is_excluded', false)->get();
 
-        // By directory
         $byDirectory = [];
         foreach ($files as $file) {
             $dir = dirname($file->path);
@@ -370,10 +332,8 @@ class KnowledgeBaseBuilder
             $byDirectory[$dir]['total_bytes'] += $file->size_bytes ?? 0;
         }
 
-        // Sort by path
         ksort($byDirectory);
 
-        // By extension
         $byExtension = [];
         foreach ($files as $file) {
             $ext = $file->extension ?: 'no_extension';
@@ -394,11 +354,6 @@ class KnowledgeBaseBuilder
         $this->writeJson($this->outputPath . '/directory_stats.json', $stats);
     }
 
-    // generateChunkId() is provided by HasDeterministicChunkId trait
-
-    /**
-     * Get the raw content for a chunk, preserving original lines.
-     */
     private function getChunkContent($chunk): ?string
     {
         $fullPath = $this->project->repo_path . '/' . $chunk->path;
@@ -414,7 +369,6 @@ class KnowledgeBaseBuilder
 
         $lines = explode("\n", $content);
 
-        // Validate line numbers
         $startLine = max(1, $chunk->start_line);
         $endLine = min(count($lines), $chunk->end_line);
 
@@ -422,15 +376,11 @@ class KnowledgeBaseBuilder
             return null;
         }
 
-        // Extract lines (inclusive, 1-indexed to 0-indexed)
         $chunkLines = array_slice($lines, $startLine - 1, $endLine - $startLine + 1);
 
         return implode("\n", $chunkLines);
     }
 
-    /**
-     * Validate that all chunk IDs in files_index exist in chunks.ndjson.
-     */
     private function validateConsistency(): array
     {
         $indexSet = array_flip($this->chunkIdsInIndex);
@@ -467,9 +417,6 @@ class KnowledgeBaseBuilder
         return $summary;
     }
 
-    /**
-     * Write JSON data to file with pretty printing.
-     */
     private function writeJson(string $path, array $data): void
     {
         $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
@@ -479,17 +426,11 @@ class KnowledgeBaseBuilder
         file_put_contents($path, $json);
     }
 
-    /**
-     * Get the output path for the current build.
-     */
     public function getOutputPath(): string
     {
         return $this->outputPath ?? '';
     }
 
-    /**
-     * Get the scan ID.
-     */
     public function getScanId(): string
     {
         return $this->scanId ?? '';

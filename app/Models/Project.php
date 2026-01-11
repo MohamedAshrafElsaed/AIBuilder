@@ -76,7 +76,7 @@ class Project extends Model
     }
 
     // -------------------------------------------------------------------------
-    // Path Accessors - Legacy Storage
+    // Path Accessors - Unified Storage
     // -------------------------------------------------------------------------
 
     public function getStoragePathAttribute(): string
@@ -104,16 +104,12 @@ class Project extends Model
         return $this->knowledge_path . '/indexes';
     }
 
-    // -------------------------------------------------------------------------
-    // Path Accessors - New Knowledge Base Output
-    // -------------------------------------------------------------------------
-
     /**
-     * Get the base path for all knowledge base outputs.
+     * Get the base path for KB scan outputs (unified under knowledge_path).
      */
     public function getKbBasePathAttribute(): string
     {
-        return storage_path('app/project_kb/' . $this->id);
+        return $this->knowledge_path . '/scans';
     }
 
     /**
@@ -198,7 +194,6 @@ class Project extends Model
             }
         }
 
-        // Sort by scanned_at descending
         usort($scans, fn($a, $b) => ($b['scanned_at'] ?? '') <=> ($a['scanned_at'] ?? ''));
 
         return $scans;
@@ -257,30 +252,15 @@ class Project extends Model
         return is_dir($this->repo_path . '/.git');
     }
 
-    public function hasKnowledgeBase(): bool
-    {
-        return $this->last_kb_scan_id !== null && is_dir($this->getKbScanPath($this->last_kb_scan_id));
-    }
-
     // -------------------------------------------------------------------------
     // Status Updates
     // -------------------------------------------------------------------------
 
-    public function markScanning(string $stage = 'workspace', int $percent = 0): void
+    public function markScanning(): void
     {
         $this->update([
             'status' => 'scanning',
-            'current_stage' => $stage,
-            'stage_percent' => $percent,
             'last_error' => null,
-        ]);
-    }
-
-    public function updateProgress(string $stage, int $percent): void
-    {
-        $this->update([
-            'current_stage' => $stage,
-            'stage_percent' => $percent,
         ]);
     }
 
@@ -288,10 +268,8 @@ class Project extends Model
     {
         $this->update([
             'status' => 'ready',
-            'current_stage' => null,
-            'stage_percent' => 100,
-            'scanned_at' => now(),
             'last_commit_sha' => $commitSha,
+            'scanned_at' => now(),
             'last_error' => null,
         ]);
     }
@@ -304,16 +282,20 @@ class Project extends Model
         ]);
     }
 
-    // -------------------------------------------------------------------------
-    // Stats Updates
-    // -------------------------------------------------------------------------
-
-    public function updateStats(int $files, int $lines, int $bytes): void
+    public function updateProgress(string $stage, int $percent): void
     {
         $this->update([
-            'total_files' => $files,
-            'total_lines' => $lines,
-            'total_size_bytes' => $bytes,
+            'current_stage' => $stage,
+            'stage_percent' => $percent,
+        ]);
+    }
+
+    public function updateStats(int $totalFiles, int $totalLines, int $totalBytes): void
+    {
+        $this->update([
+            'total_files' => $totalFiles,
+            'total_lines' => $totalLines,
+            'total_size_bytes' => $totalBytes,
         ]);
     }
 
@@ -322,24 +304,11 @@ class Project extends Model
         $this->update(['stack_info' => $stack]);
     }
 
-    public function updateScanVersion(string $version, string $rulesVersion): void
-    {
-        $this->update([
-            'scan_output_version' => $version,
-            'exclusion_rules_version' => $rulesVersion,
-        ]);
-    }
-
-    public function setLastKbScanId(string $scanId): void
-    {
-        $this->update(['last_kb_scan_id' => $scanId]);
-    }
-
     // -------------------------------------------------------------------------
-    // GitHub URLs
+    // URL Helpers
     // -------------------------------------------------------------------------
 
-    public function getGitHubCloneUrl(): string
+    public function getGitCloneUrl(): string
     {
         return 'https://github.com/' . $this->repo_full_name . '.git';
     }
@@ -384,9 +353,6 @@ class Project extends Model
         return $this->chunks()->where('path', $path)->orderBy('start_line');
     }
 
-    /**
-     * Find a chunk by its deterministic ID.
-     */
     public function findChunkById(string $chunkId): ?ProjectFileChunk
     {
         return $this->chunks()->where('chunk_id', $chunkId)->first();
@@ -398,16 +364,9 @@ class Project extends Model
 
     public function cleanupStorage(): void
     {
-        // Clean legacy storage
         $path = $this->storage_path;
         if (is_dir($path)) {
             $this->recursiveDelete($path);
-        }
-
-        // Clean KB outputs
-        $kbPath = $this->kb_base_path;
-        if (is_dir($kbPath)) {
-            $this->recursiveDelete($kbPath);
         }
     }
 
