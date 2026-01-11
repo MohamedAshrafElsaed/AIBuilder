@@ -16,12 +16,16 @@ use Illuminate\Support\Carbon;
  * @property string|null $provider_email
  * @property string|null $avatar
  * @property array<array-key, mixed>|null $provider_data
+ * @property string|null $access_token
+ * @property string|null $refresh_token
+ * @property Carbon|null $token_expires_at
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
- * @property-read User $user
+ * @property-read \App\Models\User $user
  * @method static Builder<static>|SocialAccount newModelQuery()
  * @method static Builder<static>|SocialAccount newQuery()
  * @method static Builder<static>|SocialAccount query()
+ * @method static Builder<static>|SocialAccount whereAccessToken($value)
  * @method static Builder<static>|SocialAccount whereAvatar($value)
  * @method static Builder<static>|SocialAccount whereCreatedAt($value)
  * @method static Builder<static>|SocialAccount whereId($value)
@@ -29,6 +33,8 @@ use Illuminate\Support\Carbon;
  * @method static Builder<static>|SocialAccount whereProviderData($value)
  * @method static Builder<static>|SocialAccount whereProviderEmail($value)
  * @method static Builder<static>|SocialAccount whereProviderId($value)
+ * @method static Builder<static>|SocialAccount whereRefreshToken($value)
+ * @method static Builder<static>|SocialAccount whereTokenExpiresAt($value)
  * @method static Builder<static>|SocialAccount whereUpdatedAt($value)
  * @method static Builder<static>|SocialAccount whereUserId($value)
  * @mixin Eloquent

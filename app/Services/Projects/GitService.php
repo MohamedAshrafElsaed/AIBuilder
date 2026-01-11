@@ -27,6 +27,9 @@ class GitService
         }
     }
 
+    /**
+     * @throws Exception
+     */
     public function cloneOrUpdate(Project $project, string $token): string
     {
         $this->ensureWorkspace($project);
@@ -38,6 +41,9 @@ class GitService
         return $this->cloneRepository($project, $token);
     }
 
+    /**
+     * @throws Exception
+     */
     private function cloneRepository(Project $project, string $token): string
     {
         $cloneUrl = $this->getAuthenticatedUrl($project, $token);
@@ -64,6 +70,9 @@ class GitService
         return $this->getCurrentCommitSha($project);
     }
 
+    /**
+     * @throws Exception
+     */
     private function fetchAndCheckout(Project $project, string $token): string
     {
         $repoPath = $project->repo_path;
@@ -140,9 +149,8 @@ class GitService
 
             match ($status[0]) {
                 'A' => $changes['added'][] = $path,
-                'M' => $changes['modified'][] = $path,
+                'M', 'R' => $changes['modified'][] = $path,
                 'D' => $changes['deleted'][] = $path,
-                'R' => $changes['modified'][] = $path,
                 default => null,
             };
         }

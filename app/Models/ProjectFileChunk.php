@@ -8,6 +8,60 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+/**
+ * @property int $id
+ * @property string $project_id
+ * @property string $chunk_id
+ * @property string|null $old_chunk_id
+ * @property string $path
+ * @property int $start_line
+ * @property int|null $end_line
+ * @property int $chunk_index
+ * @property string|null $sha1
+ * @property string|null $chunk_sha1
+ * @property bool $is_complete_file
+ * @property array<array-key, mixed>|null $symbols_declared
+ * @property array<array-key, mixed>|null $symbols_used
+ * @property array<array-key, mixed>|null $imports
+ * @property array<array-key, mixed>|null $references
+ * @property string|null $chunk_file_path
+ * @property int $chunk_size_bytes
+ * @property \Illuminate\Support\Carbon|null $created_at
+ * @property \Illuminate\Support\Carbon|null $updated_at
+ * @property-read \App\Models\ProjectFile|null $file
+ * @property-read int $line_count
+ * @property-read string $path_hash
+ * @property-read \App\Models\Project $project
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFileChunk byChunkId(string $chunkId)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFileChunk byOldChunkId(string $oldChunkId)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFileChunk completeFiles()
+ * @method static \Database\Factories\ProjectFileChunkFactory factory($count = null, $state = [])
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFileChunk forFile(string $path)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFileChunk newModelQuery()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFileChunk newQuery()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFileChunk partialFiles()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFileChunk query()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFileChunk whereChunkFilePath($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFileChunk whereChunkId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFileChunk whereChunkIndex($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFileChunk whereChunkSha1($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFileChunk whereChunkSizeBytes($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFileChunk whereCreatedAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFileChunk whereEndLine($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFileChunk whereId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFileChunk whereImports($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFileChunk whereIsCompleteFile($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFileChunk whereOldChunkId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFileChunk wherePath($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFileChunk whereProjectId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFileChunk whereReferences($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFileChunk whereSha1($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFileChunk whereStartLine($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFileChunk whereSymbolsDeclared($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFileChunk whereSymbolsUsed($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFileChunk whereUpdatedAt($value)
+ * @mixin \Eloquent
+ */
 class ProjectFileChunk extends Model
 {
     /** @use HasFactory<ProjectFileChunkFactory> */

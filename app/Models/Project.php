@@ -3,20 +3,95 @@
 namespace App\Models;
 
 use Database\Factories\ProjectFactory;
+use Eloquent;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Carbon;
 
+/**
+ * @property string $id
+ * @property int $user_id
+ * @property string $provider
+ * @property string $repo_full_name
+ * @property string|null $repo_id
+ * @property string $default_branch
+ * @property string|null $selected_branch
+ * @property string $status
+ * @property string|null $current_stage
+ * @property int $stage_percent
+ * @property Carbon|null $scanned_at
+ * @property string|null $last_commit_sha
+ * @property string|null $last_kb_scan_id
+ * @property string|null $parent_commit_sha
+ * @property string|null $scan_output_version
+ * @property string|null $exclusion_rules_version
+ * @property Carbon|null $last_migration_at
+ * @property string|null $last_error
+ * @property array<array-key, mixed>|null $stack_info
+ * @property int $total_files
+ * @property int $total_lines
+ * @property int $total_size_bytes
+ * @property Carbon|null $created_at
+ * @property Carbon|null $updated_at
+ * @property-read Collection<int, ProjectFileChunk> $chunks
+ * @property-read int|null $chunks_count
+ * @property-read Collection<int, ProjectFile> $files
+ * @property-read int|null $files_count
+ * @property-read string $active_branch
+ * @property-read string $chunks_path
+ * @property-read string $indexes_path
+ * @property-read string $kb_base_path
+ * @property-read string $knowledge_path
+ * @property-read string|null $latest_kb_path
+ * @property-read string $owner
+ * @property-read string $repo_name
+ * @property-read string $repo_path
+ * @property-read string $storage_path
+ * @property-read Collection<int, ProjectScan> $scans
+ * @property-read int|null $scans_count
+ * @property-read User $user
+ * @method static ProjectFactory factory($count = null, $state = [])
+ * @method static Builder<static>|Project newModelQuery()
+ * @method static Builder<static>|Project newQuery()
+ * @method static Builder<static>|Project query()
+ * @method static Builder<static>|Project whereCreatedAt($value)
+ * @method static Builder<static>|Project whereCurrentStage($value)
+ * @method static Builder<static>|Project whereDefaultBranch($value)
+ * @method static Builder<static>|Project whereExclusionRulesVersion($value)
+ * @method static Builder<static>|Project whereId($value)
+ * @method static Builder<static>|Project whereLastCommitSha($value)
+ * @method static Builder<static>|Project whereLastError($value)
+ * @method static Builder<static>|Project whereLastKbScanId($value)
+ * @method static Builder<static>|Project whereLastMigrationAt($value)
+ * @method static Builder<static>|Project whereParentCommitSha($value)
+ * @method static Builder<static>|Project whereProvider($value)
+ * @method static Builder<static>|Project whereRepoFullName($value)
+ * @method static Builder<static>|Project whereRepoId($value)
+ * @method static Builder<static>|Project whereScanOutputVersion($value)
+ * @method static Builder<static>|Project whereScannedAt($value)
+ * @method static Builder<static>|Project whereSelectedBranch($value)
+ * @method static Builder<static>|Project whereStackInfo($value)
+ * @method static Builder<static>|Project whereStagePercent($value)
+ * @method static Builder<static>|Project whereStatus($value)
+ * @method static Builder<static>|Project whereTotalFiles($value)
+ * @method static Builder<static>|Project whereTotalLines($value)
+ * @method static Builder<static>|Project whereTotalSizeBytes($value)
+ * @method static Builder<static>|Project whereUpdatedAt($value)
+ * @method static Builder<static>|Project whereUserId($value)
+ * @mixin Eloquent
+ */
 class Project extends Model
 {
     /** @use HasFactory<ProjectFactory> */
     use HasFactory, HasUuids;
 
-    protected $keyType = 'string';
     public $incrementing = false;
-
+    protected $keyType = 'string';
     protected $fillable = [
         'user_id',
         'provider',
@@ -41,47 +116,24 @@ class Project extends Model
         'last_kb_scan_id',
     ];
 
-    protected function casts(): array
+    public function user(): BelongsTo
     {
-        return [
-            'scanned_at' => 'datetime',
-            'last_migration_at' => 'datetime',
-            'stack_info' => 'array',
-        ];
+        return $this->belongsTo(User::class);
     }
 
     // -------------------------------------------------------------------------
     // Relationships
     // -------------------------------------------------------------------------
 
-    public function user(): BelongsTo
+    public function latestScan(): ?ProjectScan
     {
-        return $this->belongsTo(User::class);
+        return $this->scans()->latest()->first();
     }
 
     public function scans(): HasMany
     {
         return $this->hasMany(ProjectScan::class);
     }
-
-    public function files(): HasMany
-    {
-        return $this->hasMany(ProjectFile::class);
-    }
-
-    public function chunks(): HasMany
-    {
-        return $this->hasMany(ProjectFileChunk::class);
-    }
-
-    public function latestScan(): ?ProjectScan
-    {
-        return $this->scans()->latest()->first();
-    }
-
-    // -------------------------------------------------------------------------
-    // Path Accessors - Unified Storage
-    // -------------------------------------------------------------------------
 
     public function getStoragePathAttribute(): string
     {
@@ -98,6 +150,10 @@ class Project extends Model
         return $this->storage_path . '/knowledge';
     }
 
+    // -------------------------------------------------------------------------
+    // Path Accessors - Unified Storage
+    // -------------------------------------------------------------------------
+
     public function getChunksPathAttribute(): string
     {
         return $this->knowledge_path . '/chunks';
@@ -113,17 +169,17 @@ class Project extends Model
         return $this->knowledge_path . '/scans';
     }
 
-    public function getKbScanPath(string $scanId): string
-    {
-        return $this->kb_base_path . '/' . $scanId;
-    }
-
     public function getLatestKbPathAttribute(): ?string
     {
         if (!$this->last_kb_scan_id) {
             return null;
         }
         return $this->getKbScanPath($this->last_kb_scan_id);
+    }
+
+    public function getKbScanPath(string $scanId): string
+    {
+        return $this->kb_base_path . '/' . $scanId;
     }
 
     public function getKbScanMetaPath(string $scanId): string
@@ -150,39 +206,6 @@ class Project extends Model
         return $this->getKbScanPath($scanId) . '/directory_stats.json';
     }
 
-    public function listKbScans(): array
-    {
-        $basePath = $this->kb_base_path;
-        if (!is_dir($basePath)) {
-            return [];
-        }
-
-        $scans = [];
-        foreach (scandir($basePath) as $entry) {
-            if ($entry === '.' || $entry === '..') continue;
-            if (is_dir($basePath . '/' . $entry) && str_starts_with($entry, 'scan_')) {
-                $metaPath = $basePath . '/' . $entry . '/scan_meta.json';
-                if (file_exists($metaPath)) {
-                    $meta = json_decode(file_get_contents($metaPath), true);
-                    $scans[] = [
-                        'scan_id' => $entry,
-                        'scanned_at' => $meta['scanned_at_iso'] ?? null,
-                        'head_commit_sha' => $meta['head_commit_sha'] ?? null,
-                        'total_chunks' => $meta['stats']['total_chunks'] ?? 0,
-                    ];
-                }
-            }
-        }
-
-        usort($scans, fn($a, $b) => ($b['scanned_at'] ?? '') <=> ($a['scanned_at'] ?? ''));
-
-        return $scans;
-    }
-
-    // -------------------------------------------------------------------------
-    // Repository Accessors
-    // -------------------------------------------------------------------------
-
     public function getOwnerAttribute(): string
     {
         return explode('/', $this->repo_full_name)[0] ?? '';
@@ -198,14 +221,14 @@ class Project extends Model
         return $this->selected_branch ?? $this->default_branch;
     }
 
-    // -------------------------------------------------------------------------
-    // Status Checks
-    // -------------------------------------------------------------------------
-
     public function isScanning(): bool
     {
         return $this->status === 'scanning';
     }
+
+    // -------------------------------------------------------------------------
+    // Repository Accessors
+    // -------------------------------------------------------------------------
 
     public function isReady(): bool
     {
@@ -222,6 +245,10 @@ class Project extends Model
         return $this->status === 'pending';
     }
 
+    // -------------------------------------------------------------------------
+    // Status Checks
+    // -------------------------------------------------------------------------
+
     public function needsMigration(): bool
     {
         return $this->scan_output_version === null || version_compare($this->scan_output_version, '2.1.0', '<');
@@ -231,10 +258,6 @@ class Project extends Model
     {
         return is_dir($this->repo_path . '/.git');
     }
-
-    // -------------------------------------------------------------------------
-    // Status Updates
-    // -------------------------------------------------------------------------
 
     public function markScanning(): void
     {
@@ -270,6 +293,10 @@ class Project extends Model
         ]);
     }
 
+    // -------------------------------------------------------------------------
+    // Status Updates
+    // -------------------------------------------------------------------------
+
     public function updateStats(int $totalFiles, int $totalLines, int $totalBytes): void
     {
         $this->update([
@@ -284,18 +311,9 @@ class Project extends Model
         $this->update(['stack_info' => $stack]);
     }
 
-    // -------------------------------------------------------------------------
-    // URL Helpers
-    // -------------------------------------------------------------------------
-
     public function getGitCloneUrl(): string
     {
         return 'https://github.com/' . $this->repo_full_name . '.git';
-    }
-
-    public function getGitHubUrl(): string
-    {
-        return 'https://github.com/' . $this->repo_full_name;
     }
 
     public function getGitHubFileUrl(string $path, ?int $line = null): string
@@ -309,13 +327,23 @@ class Project extends Model
         return $url;
     }
 
-    // -------------------------------------------------------------------------
-    // File/Chunk Queries
-    // -------------------------------------------------------------------------
+    public function getGitHubUrl(): string
+    {
+        return 'https://github.com/' . $this->repo_full_name;
+    }
 
     public function getIncludedFiles()
     {
         return $this->files()->where('is_excluded', false);
+    }
+
+    // -------------------------------------------------------------------------
+    // URL Helpers
+    // -------------------------------------------------------------------------
+
+    public function files(): HasMany
+    {
+        return $this->hasMany(ProjectFile::class);
     }
 
     public function getExcludedFiles()
@@ -328,9 +356,18 @@ class Project extends Model
         return $this->files()->where('language', $language)->where('is_excluded', false);
     }
 
+    // -------------------------------------------------------------------------
+    // File/Chunk Queries
+    // -------------------------------------------------------------------------
+
     public function getChunksForFile(string $path)
     {
         return $this->chunks()->where('path', $path)->orderBy('start_line');
+    }
+
+    public function chunks(): HasMany
+    {
+        return $this->hasMany(ProjectFileChunk::class);
     }
 
     public function findChunkById(string $chunkId): ?ProjectFileChunk
@@ -338,32 +375,11 @@ class Project extends Model
         return $this->chunks()->where('chunk_id', $chunkId)->first();
     }
 
-    // -------------------------------------------------------------------------
-    // Cleanup
-    // -------------------------------------------------------------------------
-
     public function cleanupStorage(): void
     {
         $path = $this->storage_path;
         if (is_dir($path)) {
             $this->recursiveDelete($path);
-        }
-    }
-
-    public function cleanupOldKbScans(int $keep = 3): void
-    {
-        $scans = $this->listKbScans();
-
-        if (count($scans) <= $keep) {
-            return;
-        }
-
-        $toDelete = array_slice($scans, $keep);
-        foreach ($toDelete as $scan) {
-            $scanPath = $this->getKbScanPath($scan['scan_id']);
-            if (is_dir($scanPath)) {
-                $this->recursiveDelete($scanPath);
-            }
         }
     }
 
@@ -383,5 +399,64 @@ class Project extends Model
             }
             rmdir($dir);
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Cleanup
+    // -------------------------------------------------------------------------
+
+    public function cleanupOldKbScans(int $keep = 3): void
+    {
+        $scans = $this->listKbScans();
+
+        if (count($scans) <= $keep) {
+            return;
+        }
+
+        $toDelete = array_slice($scans, $keep);
+        foreach ($toDelete as $scan) {
+            $scanPath = $this->getKbScanPath($scan['scan_id']);
+            if (is_dir($scanPath)) {
+                $this->recursiveDelete($scanPath);
+            }
+        }
+    }
+
+    public function listKbScans(): array
+    {
+        $basePath = $this->kb_base_path;
+        if (!is_dir($basePath)) {
+            return [];
+        }
+
+        $scans = [];
+        foreach (scandir($basePath) as $entry) {
+            if ($entry === '.' || $entry === '..') continue;
+            if (is_dir($basePath . '/' . $entry) && str_starts_with($entry, 'scan_')) {
+                $metaPath = $basePath . '/' . $entry . '/scan_meta.json';
+                if (file_exists($metaPath)) {
+                    $meta = json_decode(file_get_contents($metaPath), true);
+                    $scans[] = [
+                        'scan_id' => $entry,
+                        'scanned_at' => $meta['scanned_at_iso'] ?? null,
+                        'head_commit_sha' => $meta['head_commit_sha'] ?? null,
+                        'total_chunks' => $meta['stats']['total_chunks'] ?? 0,
+                    ];
+                }
+            }
+        }
+
+        usort($scans, fn($a, $b) => ($b['scanned_at'] ?? '') <=> ($a['scanned_at'] ?? ''));
+
+        return $scans;
+    }
+
+    protected function casts(): array
+    {
+        return [
+            'scanned_at' => 'datetime',
+            'last_migration_at' => 'datetime',
+            'stack_info' => 'array',
+        ];
     }
 }

@@ -393,10 +393,6 @@ readonly class EnhancedAskResponse
         return $this->status === 'success';
     }
 
-    public function needsClarification(): bool
-    {
-        return $this->status === 'needs_clarification';
-    }
 
     public function hasError(): bool
     {

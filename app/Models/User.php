@@ -29,14 +29,14 @@ use Laravel\Fortify\TwoFactorAuthenticatable;
  * @property string|null $remember_token
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
- * @property-read SocialAccount|null $githubAccount
+ * @property-read \App\Models\SocialAccount|null $githubAccount
  * @property-read DatabaseNotificationCollection<int, DatabaseNotification> $notifications
  * @property-read int|null $notifications_count
- * @property-read Collection<int, Project> $projects
+ * @property-read Collection<int, \App\Models\Project> $projects
  * @property-read int|null $projects_count
- * @property-read Collection<int, SocialAccount> $socialAccounts
+ * @property-read Collection<int, \App\Models\SocialAccount> $socialAccounts
  * @property-read int|null $social_accounts_count
- * @method static UserFactory factory($count = null, $state = [])
+ * @method static \Database\Factories\UserFactory factory($count = null, $state = [])
  * @method static Builder<static>|User newModelQuery()
  * @method static Builder<static>|User newQuery()
  * @method static Builder<static>|User query()

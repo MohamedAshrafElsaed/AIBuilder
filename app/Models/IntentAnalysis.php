@@ -19,19 +19,51 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string $raw_input
  * @property IntentType $intent_type
  * @property float $confidence_score
- * @property array|null $extracted_entities
- * @property array|null $domain_classification
+ * @property array<array-key, mixed>|null $extracted_entities
+ * @property array<array-key, mixed>|null $domain_classification
  * @property ComplexityLevel $complexity_estimate
  * @property bool $requires_clarification
- * @property array|null $clarification_questions
- * @property array|null $metadata
+ * @property array<array-key, mixed>|null $clarification_questions
+ * @property array<array-key, mixed>|null $metadata
  * @property \Illuminate\Support\Carbon|null $created_at
  * @property \Illuminate\Support\Carbon|null $updated_at
- * @property-read Project $project
+ * @property-read array<string> $mentioned_components
+ * @property-read array<string> $mentioned_features
+ * @property-read array<string> $mentioned_files
  * @property-read string $primary_domain
- * @property-read array $secondary_domains
- * @property-read array $mentioned_files
- * @property-read array $mentioned_components
+ * @property-read float|null $processing_time
+ * @property-read array<string> $secondary_domains
+ * @property-read int|null $tokens_used
+ * @property-read \App\Models\Project $project
+ * @method static \Database\Factories\IntentAnalysisFactory factory($count = null, $state = [])
+ * @method static Builder<static>|IntentAnalysis forConversation(string $conversationId)
+ * @method static Builder<static>|IntentAnalysis highConfidence(float $threshold = 0.8)
+ * @method static Builder<static>|IntentAnalysis inDomain(string $domain)
+ * @method static Builder<static>|IntentAnalysis lowConfidence(float $threshold = 0.5)
+ * @method static Builder<static>|IntentAnalysis needingClarification()
+ * @method static Builder<static>|IntentAnalysis newModelQuery()
+ * @method static Builder<static>|IntentAnalysis newQuery()
+ * @method static Builder<static>|IntentAnalysis ofType(\App\Enums\IntentType $type)
+ * @method static Builder<static>|IntentAnalysis ofTypes(array $types)
+ * @method static Builder<static>|IntentAnalysis query()
+ * @method static Builder<static>|IntentAnalysis requiresCodeChanges()
+ * @method static Builder<static>|IntentAnalysis whereClarificationQuestions($value)
+ * @method static Builder<static>|IntentAnalysis whereComplexityEstimate($value)
+ * @method static Builder<static>|IntentAnalysis whereConfidenceScore($value)
+ * @method static Builder<static>|IntentAnalysis whereConversationId($value)
+ * @method static Builder<static>|IntentAnalysis whereCreatedAt($value)
+ * @method static Builder<static>|IntentAnalysis whereDomainClassification($value)
+ * @method static Builder<static>|IntentAnalysis whereExtractedEntities($value)
+ * @method static Builder<static>|IntentAnalysis whereId($value)
+ * @method static Builder<static>|IntentAnalysis whereIntentType($value)
+ * @method static Builder<static>|IntentAnalysis whereMessageId($value)
+ * @method static Builder<static>|IntentAnalysis whereMetadata($value)
+ * @method static Builder<static>|IntentAnalysis whereProjectId($value)
+ * @method static Builder<static>|IntentAnalysis whereRawInput($value)
+ * @method static Builder<static>|IntentAnalysis whereRequiresClarification($value)
+ * @method static Builder<static>|IntentAnalysis whereUpdatedAt($value)
+ * @method static Builder<static>|IntentAnalysis withComplexity(\App\Enums\ComplexityLevel $complexity)
+ * @mixin \Eloquent
  */
 class IntentAnalysis extends Model
 {

@@ -8,6 +8,66 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+/**
+ * @property int $id
+ * @property string|null $file_id
+ * @property string $project_id
+ * @property string $path
+ * @property string|null $extension
+ * @property string|null $language
+ * @property int $size_bytes
+ * @property string|null $sha1
+ * @property int $line_count
+ * @property bool $is_binary
+ * @property bool $is_excluded
+ * @property string|null $exclusion_reason
+ * @property array<array-key, mixed>|null $framework_hints
+ * @property array<array-key, mixed>|null $symbols_declared
+ * @property array<array-key, mixed>|null $imports
+ * @property string|null $mime_type
+ * @property \Illuminate\Support\Carbon|null $file_modified_at
+ * @property \Illuminate\Support\Carbon|null $created_at
+ * @property \Illuminate\Support\Carbon|null $updated_at
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\ProjectFileChunk> $chunks
+ * @property-read int|null $chunks_count
+ * @property-read int $chunk_count
+ * @property-read array $chunk_ids
+ * @property-read string $directory
+ * @property-read string $filename
+ * @property-read \App\Models\Project $project
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFile binary()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFile byExtension(string $extension)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFile byLanguage(string $language)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFile excluded()
+ * @method static \Database\Factories\ProjectFileFactory factory($count = null, $state = [])
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFile inDirectory(string $directory)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFile included()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFile newModelQuery()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFile newQuery()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFile nonBinary()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFile query()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFile whereCreatedAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFile whereExclusionReason($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFile whereExtension($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFile whereFileId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFile whereFileModifiedAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFile whereFrameworkHints($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFile whereId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFile whereImports($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFile whereIsBinary($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFile whereIsExcluded($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFile whereLanguage($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFile whereLineCount($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFile whereMimeType($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFile wherePath($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFile whereProjectId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFile whereSha1($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFile whereSizeBytes($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFile whereSymbolsDeclared($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFile whereUpdatedAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ProjectFile withFrameworkHint(string $hint)
+ * @mixin \Eloquent
+ */
 class ProjectFile extends Model
 {
     /** @use HasFactory<ProjectFileFactory> */
