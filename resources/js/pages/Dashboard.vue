@@ -9,7 +9,7 @@ import { dashboard } from '@/routes';
 import { create } from '@/routes/projects';
 import { type BreadcrumbItem, type PipelineStage, type Project } from '@/types';
 import { Head, Link } from '@inertiajs/vue3';
-import { Plus, Sparkles } from 'lucide-vue-next';
+import { Plus, Sparkles, Zap } from 'lucide-vue-next';
 import { computed, onMounted, ref } from 'vue';
 
 interface Props {
@@ -72,45 +72,35 @@ const failedProjects = computed(() => {
 const completedProjects = computed(() => {
     return [...readyProjects.value, ...failedProjects.value];
 });
-
-// Check if project should show loader
-const shouldShowLoader = (project: Project) => {
-    return (
-        project.status === 'scanning' ||
-        project.status === 'pending' ||
-        project.status === 'failed' ||
-        project.id === props.newProjectId
-    );
-};
 </script>
 
 <template>
     <Head title="Dashboard" />
 
     <AppLayout :breadcrumbs="breadcrumbs">
-        <div class="flex h-full flex-1 flex-col gap-8 p-6 md:p-8 lg:p-10">
+        <div class="flex h-full flex-1 flex-col gap-8 p-6 md:p-8 dark:bg-[#0D0D0D]">
             <!-- Page Header -->
             <header
-                class="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between"
+                class="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between animate-fade-in"
             >
                 <div class="space-y-1">
                     <div class="flex items-center gap-3">
                         <h1
-                            class="text-3xl font-semibold tracking-tight text-foreground"
+                            class="text-2xl font-semibold tracking-tight text-foreground dark:text-[#E5E5E5]"
                         >
                             Projects
                         </h1>
                         <!-- AI Activity Indicator -->
                         <div
                             v-if="activeAIProcesses > 0"
-                            class="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-violet-500/10 to-indigo-500/10 px-3 py-1 text-xs font-medium text-violet-600 ring-1 ring-violet-500/20 ring-inset dark:text-violet-400"
+                            class="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset bg-primary/10 text-primary ring-primary/20 dark:bg-[#F97316]/10 dark:text-[#FB923C] dark:ring-[#F97316]/20"
                         >
                             <span class="relative flex h-2 w-2">
                                 <span
-                                    class="absolute inline-flex h-full w-full animate-ping rounded-full bg-violet-400 opacity-75"
+                                    class="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75 dark:bg-[#F97316]"
                                 ></span>
                                 <span
-                                    class="relative inline-flex h-2 w-2 rounded-full bg-violet-500"
+                                    class="relative inline-flex h-2 w-2 rounded-full bg-primary dark:bg-[#F97316]"
                                 ></span>
                             </span>
                             {{ activeAIProcesses }} AI
@@ -122,15 +112,14 @@ const shouldShowLoader = (project: Project) => {
                             active
                         </div>
                     </div>
-                    <p class="text-base text-muted-foreground">
-                        Manage your connected repositories and AI-powered
-                        insights
+                    <p class="text-sm text-muted-foreground dark:text-[#737373]">
+                        Manage your connected repositories and AI-powered insights
                     </p>
                 </div>
 
                 <Link :href="create()">
                     <Button
-                        class="group relative overflow-hidden bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-lg shadow-violet-500/25 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-violet-500/30"
+                        class="group relative overflow-hidden bg-primary text-white shadow-md transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg dark:bg-[#F97316] dark:hover:bg-[#EA580C]"
                     >
                         <Plus
                             class="mr-2 size-4 transition-transform duration-200 group-hover:rotate-90"
@@ -162,8 +151,9 @@ const shouldShowLoader = (project: Project) => {
                 >
                     <h2
                         v-if="completedProjects.length > 0"
-                        class="mb-4 text-sm font-medium text-muted-foreground"
+                        class="mb-4 text-xs font-medium uppercase tracking-wider text-muted-foreground dark:text-[#525252]"
                     >
+                        <Zap class="inline-block size-3.5 mr-1.5 -mt-0.5" />
                         In Progress
                     </h2>
                     <div class="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
@@ -199,7 +189,7 @@ const shouldShowLoader = (project: Project) => {
                             scanningProjects.length > 0 ||
                             failedProjects.length > 0
                         "
-                        class="mb-4 text-sm font-medium text-muted-foreground"
+                        class="mb-4 text-xs font-medium uppercase tracking-wider text-muted-foreground dark:text-[#525252]"
                     >
                         Ready
                     </h2>

@@ -30,9 +30,9 @@ const avatarInitials = computed(() => {
 // Avatar gradient based on repo name (for visual variety)
 const avatarGradient = computed(() => {
     const gradients = [
-        'from-violet-500 to-indigo-500',
+        'from-orange-500 to-amber-500',
         'from-emerald-500 to-teal-500',
-        'from-amber-500 to-orange-500',
+        'from-violet-500 to-purple-500',
         'from-pink-500 to-rose-500',
         'from-cyan-500 to-blue-500',
     ];
@@ -56,15 +56,6 @@ const formatRelativeTime = (date: string) => {
     if (hours > 0) return `${hours}h ago`;
     if (minutes > 0) return `${minutes}m ago`;
     return 'Just now';
-};
-
-// Format file size
-const formatSize = (bytes: number) => {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 };
 
 // Format number with K/M suffix
@@ -98,7 +89,7 @@ const stackBadges = computed(() => {
 <template>
     <Link :href="show({ project: project.id })" class="group block">
         <div
-            class="relative overflow-hidden rounded-xl border border-border/50 bg-card p-5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-border hover:shadow-md"
+            class="relative overflow-hidden rounded-lg border bg-card p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg dark:bg-[#171717] dark:border-[#262626] dark:hover:border-[#333] dark:hover:shadow-[0_8px_30px_rgba(0,0,0,0.4)]"
         >
             <!-- Subtle hover gradient -->
             <div
@@ -118,16 +109,16 @@ const stackBadges = computed(() => {
 
                     <div class="min-w-0 flex-1">
                         <div class="flex items-center gap-2">
-                            <h3 class="truncate font-semibold text-foreground">
+                            <h3 class="truncate font-semibold text-foreground dark:text-[#E5E5E5]">
                                 {{ project.name || project.repo_full_name }}
                             </h3>
                         </div>
                         <div
-                            class="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground"
+                            class="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground dark:text-[#737373]"
                         >
                             <span class="truncate">{{ project.owner }}</span>
                             <span
-                                class="inline-flex items-center gap-1 rounded bg-muted/50 px-1.5 py-0.5"
+                                class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 dark:bg-[#262626] dark:text-[#A3A3A3]"
                             >
                                 <GitBranch class="size-3" />
                                 {{ project.default_branch || 'main' }}
@@ -137,7 +128,7 @@ const stackBadges = computed(() => {
 
                     <!-- Status indicator -->
                     <div
-                        class="flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-600 ring-1 ring-emerald-500/20 ring-inset dark:text-emerald-400"
+                        class="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset bg-emerald-500/10 text-emerald-600 ring-emerald-500/20 dark:bg-[#22C55E]/10 dark:text-[#4ADE80] dark:ring-[#22C55E]/20"
                     >
                         <CheckCircle2 class="size-3" />
                         Ready
@@ -161,7 +152,7 @@ const stackBadges = computed(() => {
 
                 <!-- Stats row -->
                 <div
-                    class="mb-4 flex items-center gap-4 text-xs text-muted-foreground"
+                    class="mb-4 flex items-center gap-4 text-xs text-muted-foreground dark:text-[#737373]"
                 >
                     <div class="flex items-center gap-1.5">
                         <FileCode class="size-3.5" />
@@ -181,17 +172,17 @@ const stackBadges = computed(() => {
                         >
                     </div>
                     <div class="flex items-center gap-1.5">
-                        <Sparkles class="size-3.5 text-violet-500" />
+                        <Sparkles class="size-3.5 text-primary dark:text-[#F97316]" />
                         <span>AI indexed</span>
                     </div>
                 </div>
 
                 <!-- Footer -->
                 <div
-                    class="flex items-center justify-between border-t border-border/50 pt-4"
+                    class="flex items-center justify-between border-t pt-4 dark:border-[#262626]"
                 >
                     <div
-                        class="flex items-center gap-1.5 text-xs text-muted-foreground"
+                        class="flex items-center gap-1.5 text-xs text-muted-foreground dark:text-[#525252]"
                     >
                         <Clock class="size-3.5" />
                         <span v-if="project.scanned_at">
@@ -203,7 +194,7 @@ const stackBadges = computed(() => {
                     </div>
 
                     <div
-                        class="flex items-center gap-1 text-xs font-medium text-primary opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+                        class="flex items-center gap-1 text-xs font-medium text-primary opacity-0 transition-opacity duration-200 group-hover:opacity-100 dark:text-[#F97316]"
                     >
                         View Details
                         <ChevronRight class="size-3.5" />
