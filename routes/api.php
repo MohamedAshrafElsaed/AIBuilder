@@ -1,6 +1,6 @@
 <?php
 
-use App\Http\Controllers\Api\ProjectAskController;
+use App\Http\Controllers\FacebookConversionController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -10,19 +10,14 @@ use Illuminate\Support\Facades\Route;
 |
 | Here is where you can register API routes for your application. These
 | routes are loaded by the RouteServiceProvider and all of them will
-| be assigned to the "api" middleware group.
+| be assigned to the "api" middleware group. Make something great!
 |
 */
 
-Route::middleware(['web', 'auth', 'verified'])->group(function () {
-    // Ask AI about project
-    Route::post('/projects/{project}/ask', [ProjectAskController::class, 'ask'])
-        ->name('api.projects.ask');
-
-    Route::get('/projects/{project}/ask/context', [ProjectAskController::class, 'context'])
-        ->name('api.projects.ask.context');
-
-    // AI Agent Conversation Routes
-    Route::prefix('projects/{project}/ai')
-        ->group(base_path('routes/ai.php'));
-});
+Route::prefix('facebook/conversion')
+    ->middleware(['auth:sanctum', 'throttle:60,1'])
+    ->group(function () {
+        Route::post('/event', [FacebookConversionController::class, 'sendEvent']);
+        Route::post('/batch', [FacebookConversionController::class, 'sendBatchEvents']);
+        Route::post('/test', [FacebookConversionController::class, 'testEvent']);
+    });
