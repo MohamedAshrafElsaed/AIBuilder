@@ -1,5 +1,7 @@
 <?php
 
+use App\Http\Controllers\Api\CategoryController;
+use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\ProjectAskController;
 use Illuminate\Support\Facades\Route;
 
@@ -25,4 +27,8 @@ Route::middleware(['web', 'auth', 'verified'])->group(function () {
     // AI Agent Conversation Routes
     Route::prefix('projects/{project}/ai')
         ->group(base_path('routes/ai.php'));
+
+    // Product and Category API Resources
+    Route::apiResource('products', ProductController::class);
+    Route::apiResource('categories', CategoryController::class)->only(['index', 'show']);
 });
